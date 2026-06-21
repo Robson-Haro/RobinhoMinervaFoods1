@@ -4,11 +4,13 @@ import i18n, { LANGS } from './i18n'
 import { parseArquivo, autoMapear, mapearCandidato, exportarCSV } from './lib/parser'
 import { calcularScore, type ConfigTriagem, type DadosCandidato } from './lib/engine'
 import { salvarProcesso, criarTriagem, salvarCandidatos, listarCandidatos } from './lib/db'
-import { type Candidato } from './lib/supabase'
+import { supabase, type Candidato } from './lib/supabase'
+import { LOGO_MINERVA } from './logoB64'
 
 // ── Tipos locais ────────────────────────────────────────────
 type Nav = 'dashboard' | 'params' | 'triagem' | 'results' | 'whatsapp' | 'config'
 type Classificacao = 'aprovado' | 'potencial' | 'reprovado' | 'pendente'
+type FeedbackStatus = 'contratado' | 'performou_bem' | 'performou_mal' | null
 
 const PESOS_PADRAO = { d1:20, d2:10, d3:15, d4:10, d5:10, d8:15, d9:10, d10:10 }
 
@@ -53,13 +55,123 @@ function Alerta({ msg, tipo }: { msg: string; tipo: 'success'|'warn'|'info' }) {
   )
 }
 
+// ── Componente de IA: Justificativa ──────────────────────────
+function JustificativaIA({ candidato, config }: { candidato: Candidato & {rank?:number}; config: { cargo: string; desc: string } }) {
+  const [texto, setTexto] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [aberto, setAberto] = useState(false)
+
+  const gerarJustificativa = async () => {
+    if (texto) { setAberto(a => !a); return }
+    setLoading(true)
+    setAberto(true)
+    try {
+      const resp = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: 'claude-sonnet-4-6',
+          max_tokens: 1000,
+          system: `Você é um assistente especializado em recrutamento e seleção da Minerva Foods. 
+Analise o perfil do candidato e gere uma justificativa executiva concisa (máximo 4 frases) explicando a classificação.
+Responda APENAS a justificativa, sem introduções ou títulos. Tom: profissional, direto, estratégico.`,
+          messages: [{
+            role: 'user',
+            content: `Candidato: ${candidato.nome || 'N/A'}
+Cargo atual: ${candidato.cargo_atual || 'N/A'}
+Cidade: ${candidato.cidade || 'N/A'}
+Score total: ${candidato.score_total}/100
+Classificação: ${candidato.classificacao}
+Experiências: ${candidato.experiencias?.substring(0,300) || 'N/A'}
+Formação: ${candidato.formacao || 'N/A'}
+Idiomas: ${candidato.idiomas || 'N/A'}
+Vaga buscada: ${config.cargo}
+Descritivo da vaga: ${config.desc?.substring(0,300) || 'N/A'}
+
+Gere uma justificativa executiva para a classificação "${candidato.classificacao}" deste candidato.`
+          }]
+        })
+      })
+      const data = await resp.json()
+      const txt = data?.content?.[0]?.text || 'Não foi possível gerar justificativa.'
+      setTexto(txt)
+    } catch (e) {
+      setTexto('Erro ao conectar com IA. Verifique a chave VITE_ANTHROPIC_KEY nas variáveis da Vercel.')
+    }
+    setLoading(false)
+  }
+
+  return (
+    <div style={{ marginTop: 4 }}>
+      <button onClick={gerarJustificativa} style={{
+        padding:'4px 10px', borderRadius:6, fontSize:10, fontWeight:600,
+        background:'rgba(52,152,219,0.12)', color:'rgb(52,152,219)',
+        border:'0.5px solid rgba(52,152,219,0.3)', cursor:'pointer', whiteSpace:'nowrap'
+      }}>
+        {loading ? '⏳ IA...' : aberto ? '▲ IA' : '✨ IA'}
+      </button>
+      {aberto && texto && (
+        <div style={{
+          marginTop:6, padding:'10px 12px', borderRadius:8, fontSize:11,
+          background:'rgba(52,152,219,0.06)', border:'0.5px solid rgba(52,152,219,0.2)',
+          color:'var(--text)', lineHeight:1.6, maxWidth:400
+        }}>{texto}</div>
+      )}
+    </div>
+  )
+}
+
+// ── Componente de Feedback de Contratação ────────────────────
+function FeedbackContratacao({ candidatoId, feedbackAtual }: { candidatoId: string; feedbackAtual: FeedbackStatus }) {
+  const [status, setStatus] = useState<FeedbackStatus>(feedbackAtual)
+  const [loading, setLoading] = useState(false)
+
+  const registrar = async (novo: FeedbackStatus) => {
+    setLoading(true)
+    try {
+      await supabase.from('candidatos').update({
+        detalhes: { feedback: novo, feedback_at: new Date().toISOString() }
+      }).eq('id', candidatoId)
+      setStatus(novo)
+    } catch (e) {
+      console.error('Erro ao salvar feedback:', e)
+    }
+    setLoading(false)
+  }
+
+  if (status === 'performou_bem') return (
+    <span style={{ fontSize:11, color:'rgb(46,204,113)', fontWeight:600 }}>✅ Performou bem</span>
+  )
+  if (status === 'performou_mal') return (
+    <span style={{ fontSize:11, color:'rgb(231,76,60)', fontWeight:600 }}>❌ Performou mal</span>
+  )
+  if (status === 'contratado') return (
+    <div style={{ display:'flex', flexDirection:'column', gap:4 }}>
+      <span style={{ fontSize:10, color:'rgb(201,168,76)', fontWeight:600 }}>🤝 Contratado — avaliar em 90 dias:</span>
+      <div style={{ display:'flex', gap:4 }}>
+        <button onClick={() => registrar('performou_bem')} disabled={loading} style={{ padding:'3px 8px', fontSize:10, borderRadius:5, border:'0.5px solid rgba(46,204,113,0.4)', background:'rgba(46,204,113,0.1)', color:'rgb(46,204,113)', cursor:'pointer' }}>👍 Bem</button>
+        <button onClick={() => registrar('performou_mal')} disabled={loading} style={{ padding:'3px 8px', fontSize:10, borderRadius:5, border:'0.5px solid rgba(231,76,60,0.4)', background:'rgba(231,76,60,0.1)', color:'rgb(231,76,60)', cursor:'pointer' }}>👎 Mal</button>
+      </div>
+    </div>
+  )
+
+  return (
+    <button onClick={() => registrar('contratado')} disabled={loading} style={{
+      padding:'4px 10px', borderRadius:6, fontSize:10, fontWeight:600,
+      background:'rgba(201,168,76,0.12)', color:'rgb(201,168,76)',
+      border:'0.5px solid rgba(201,168,76,0.3)', cursor:'pointer', whiteSpace:'nowrap'
+    }}>
+      {loading ? '...' : '🤝 Contratado'}
+    </button>
+  )
+}
+
 // ── App principal ────────────────────────────────────────────
 export default function App() {
   const { t } = useTranslation()
   const [nav, setNav] = useState<Nav>('dashboard')
   const [lang, setLang] = useState(localStorage.getItem('robinho_lang') || 'pt')
 
-  // Estado de parâmetros
   const [pesos, setPesos] = useState(PESOS_PADRAO)
   const [pNome, setPNome] = useState('')
   const [pResp, setPResp] = useState('Robson Ramos')
@@ -79,7 +191,6 @@ export default function App() {
   const [processoId, setProcessoId] = useState<string|null>(null)
   const [keywords, setKeywords] = useState<string[]>([])
 
-  // Estado de triagem
   const [csvCols, setCsvCols] = useState<string[]>([])
   const [csvRows, setCsvRows] = useState<Record<string,string>[]>([])
   const [mapeamento, setMapeamento] = useState<Record<string,string>>({})
@@ -89,11 +200,9 @@ export default function App() {
   const [processando, setProcessando] = useState(false)
   const [triagemId, setTriagemId] = useState<string|null>(null)
 
-  // Estado de resultados
   const [candidatos, setCandidatos] = useState<(Candidato & { rank?: number })[]>([])
   const [filtro, setFiltro] = useState<'todos'|Classificacao>('todos')
 
-  // Idioma
   const mudarIdioma = (l: string) => {
     setLang(l)
     localStorage.setItem('robinho_lang', l)
@@ -105,10 +214,8 @@ export default function App() {
     setTimeout(() => setAlert(null), 3500)
   }
 
-  // Soma de pesos
   const somaPesos = Object.values(pesos).reduce((s, v) => s + v, 0)
 
-  // Extrair keywords do descritivo
   useEffect(() => {
     if (pDesc.length < 30) { setKeywords([]); return }
     const words = pDesc.toLowerCase().replace(/[^a-záàãâéêíóôõúüç\s]/g,' ').split(/\s+/).filter(w=>w.length>4)
@@ -117,7 +224,6 @@ export default function App() {
     setKeywords(Object.entries(freq).sort((a,b)=>b[1]-a[1]).slice(0,18).map(([w])=>w))
   }, [pDesc])
 
-  // Salvar configuração no Supabase
   const salvarConfig = async () => {
     const p = await salvarProcesso({
       id: processoId || undefined,
@@ -149,7 +255,6 @@ export default function App() {
     setPesos(novo)
   }
 
-  // Handle arquivo
   const handleFile = async (file: File) => {
     setDropText(`✅ ${file.name} — ${(file.size/1024).toFixed(1)} KB`)
     const result = await parseArquivo(file)
@@ -159,7 +264,6 @@ export default function App() {
     setStep(3)
   }
 
-  // Iniciar triagem
   const iniciarTriagem = async () => {
     if (!csvRows.length) return
     setProcessando(true)
@@ -177,22 +281,20 @@ export default function App() {
 
     const dadosMap: DadosCandidato[] = csvRows.map(r => mapearCandidato(r, mapeamento))
 
-    // Calcular localmente (fallback se Supabase não configurado)
     const resultados = dadosMap.map((d, i) => {
       const r = calcularScore(cfg, d)
       setProgresso(Math.round((i+1)/dadosMap.length*100))
       return { ...r, score_custom:{}, ...d, id: String(i), triagem_id:'local', processo_id:'local', wpp_enviado:false, wpp_enviado_at:null, salario_pret:null, dados_brutos:d.dados_brutos, created_at: new Date().toISOString(), rank: i+1 } as unknown as Candidato & {rank:number}
     })
 
-    // Tentar salvar no Supabase
     try {
       const pid = processoId || (await salvarProcesso({ nome: pNome||'Processo', responsavel: pResp, cargo_buscado: pCargo, descritivo: pDesc, sensibilidade: pSens, limiar_aprovado: limAp, limiar_potencial: limPot, pesos, config:{}, idioma: lang as 'pt'|'en'|'es' }))?.id
       if (pid) {
-        const t = await criarTriagem(pid, `Triagem ${new Date().toLocaleDateString('pt-BR')}`, mapeamento)
-        if (t) {
-          setTriagemId(t.id)
-          await salvarCandidatos(t.id, pid, dadosMap, cfg, (done, total) => setProgresso(Math.round(done/total*100)))
-          const saved = await listarCandidatos(t.id)
+        const tria = await criarTriagem(pid, `Triagem ${new Date().toLocaleDateString('pt-BR')}`, mapeamento)
+        if (tria) {
+          setTriagemId(tria.id)
+          await salvarCandidatos(tria.id, pid, dadosMap, cfg, (done, total) => setProgresso(Math.round(done/total*100)))
+          const saved = await listarCandidatos(tria.id)
           if (saved.length) {
             setCandidatos(saved.map((c,i) => ({...c, rank:i+1})))
             setProcessando(false)
@@ -206,7 +308,6 @@ export default function App() {
       console.warn('[Robinho] Supabase indisponível, usando dados locais.', e)
     }
 
-    // Usar resultados locais
     const sorted = resultados.sort((a, b) => b.score_total - a.score_total).map((c,i) => ({...c, rank:i+1}))
     setCandidatos(sorted)
     setProcessando(false)
@@ -226,7 +327,6 @@ export default function App() {
 
   const top5 = [...candidatos].sort((a,b)=>b.score_total-a.score_total).slice(0,5)
 
-  // ── RENDER ─────────────────────────────────────────────────
   return (
     <div style={{ minHeight:'100vh' }}>
 
@@ -236,15 +336,20 @@ export default function App() {
         background:'rgba(10,10,15,0.88)', borderBottom:'0.5px solid rgba(201,168,76,0.25)',
         position:'sticky', top:0, zIndex:100, backdropFilter:'blur(20px)'
       }}>
-        <div style={{ display:'flex', alignItems:'center', gap:12 }}>
-          <div style={{ width:32, height:32, borderRadius:6, background:'linear-gradient(135deg,#C41E3A,#8B1325)', display:'flex', alignItems:'center', justifyContent:'center', fontWeight:700, color:'#fff', fontSize:14 }}>R</div>
+        <div style={{ display:'flex', alignItems:'center', gap:14 }}>
+          {/* Logo Minerva Foods oficial */}
+          <img
+            src={LOGO_MINERVA}
+            alt="Minerva Foods"
+            style={{ height:36, objectFit:'contain', filter:'brightness(1.1)' }}
+          />
+          <div style={{ width:1, height:32, background:'rgba(201,168,76,0.3)' }} />
           <div>
             <div style={{ fontSize:15, fontWeight:600 }}>{t('brand')}</div>
             <div style={{ fontSize:11, color:'var(--text-muted)', letterSpacing:.5, textTransform:'uppercase', marginTop:1 }}>{t('subtitle')}</div>
           </div>
         </div>
         <div style={{ display:'flex', alignItems:'center', gap:10 }}>
-          {/* Seletor de idioma */}
           <select
             value={lang}
             onChange={e => mudarIdioma(e.target.value)}
@@ -252,7 +357,7 @@ export default function App() {
           >
             {LANGS.map(l => <option key={l.code} value={l.code}>{l.label}</option>)}
           </select>
-          <Badge color="201,168,76">v1.7</Badge>
+          <Badge color="201,168,76">v1.8</Badge>
           <Badge color="46,204,113">● Ativo</Badge>
         </div>
       </header>
@@ -295,7 +400,6 @@ export default function App() {
               </button>
             </div>
 
-            {/* KPIs */}
             <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:'1rem', marginBottom:'1.5rem' }}>
               {[
                 { label: t('dashboard.total'), value: stats.total, color: 'var(--text)', sub: '100%' },
@@ -312,7 +416,6 @@ export default function App() {
             </div>
 
             <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'1.25rem' }}>
-              {/* Funil */}
               <div className="glass" style={{ padding:'1.5rem' }}>
                 <h3 style={{ fontSize:14, fontWeight:600, marginBottom:'1.25rem' }}>{t('dashboard.funil')}</h3>
                 {!stats.total ? (
@@ -335,7 +438,6 @@ export default function App() {
                 )}
               </div>
 
-              {/* Top 5 */}
               <div className="glass" style={{ padding:'1.5rem' }}>
                 <h3 style={{ fontSize:14, fontWeight:600, marginBottom:'1.25rem' }}>{t('dashboard.top5')}</h3>
                 {!top5.length ? (
@@ -371,7 +473,6 @@ export default function App() {
               </div>
             </div>
 
-            {/* Info vaga */}
             <div className="glass" style={{ padding:'1.5rem', marginBottom:'1.25rem' }}>
               <p style={{ fontSize:12, fontWeight:600, color:'var(--gold)', letterSpacing:.8, textTransform:'uppercase', marginBottom:'1rem' }}>📋 {t('params.processo').toUpperCase()}</p>
               <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'1rem' }}>
@@ -410,7 +511,6 @@ export default function App() {
               )}
             </div>
 
-            {/* Limiares */}
             <div className="glass" style={{ padding:'1.5rem', marginBottom:'1.25rem' }}>
               <p style={{ fontSize:12, fontWeight:600, color:'var(--gold)', letterSpacing:.8, textTransform:'uppercase', marginBottom:'1rem' }}>🎯 {t('params.limiar_ap').toUpperCase()}</p>
               <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'1rem' }}>
@@ -427,7 +527,6 @@ export default function App() {
               </div>
             </div>
 
-            {/* Pesos */}
             <div className="glass" style={{ padding:'1.5rem', marginBottom:'1.25rem' }}>
               <p style={{ fontSize:12, fontWeight:600, color:'var(--gold)', letterSpacing:.8, textTransform:'uppercase', marginBottom:'1rem' }}>⚖️ PESOS DAS DIMENSÕES</p>
               {([
@@ -482,7 +581,6 @@ export default function App() {
             <h1 style={{ fontSize:20, fontWeight:600, marginBottom:4 }}>{t('triagem.title')}</h1>
             <p style={{ fontSize:12, color:'var(--text-muted)', marginBottom:'1.5rem' }}>{t('triagem.sub')}</p>
 
-            {/* Steps */}
             <div style={{ display:'flex', marginBottom:'2rem' }}>
               {[t('triagem.step1'), t('triagem.step2'), t('triagem.step3'), t('triagem.step4')].map((s, i) => (
                 <div key={i} style={{ flex:1, padding:'10px', textAlign:'center', fontSize:11, fontWeight:600, background: step===i+1 ? 'rgba(201,168,76,0.1)' : step>i+1 ? 'rgba(46,204,113,0.08)' : 'rgba(255,255,255,0.03)', border:'0.5px solid', borderColor: step===i+1 ? 'rgba(201,168,76,0.4)' : step>i+1 ? 'rgba(46,204,113,0.3)' : 'var(--border)', color: step===i+1 ? 'var(--gold)' : step>i+1 ? 'var(--green)' : 'var(--text-dim)', borderRadius: i===0 ? '8px 0 0 8px' : i===3 ? '0 8px 8px 0' : 0 }}>
@@ -492,7 +590,6 @@ export default function App() {
               ))}
             </div>
 
-            {/* Dropzone */}
             <div className="glass" style={{ padding:'1.5rem', marginBottom:'1.25rem' }}>
               <div
                 onClick={() => document.getElementById('csv-input')?.click()}
@@ -507,7 +604,6 @@ export default function App() {
               </div>
             </div>
 
-            {/* Mapeamento */}
             {csvCols.length > 0 && (
               <div className="glass" style={{ padding:'1.5rem', marginBottom:'1.25rem' }}>
                 <p style={{ fontSize:12, fontWeight:600, color:'var(--gold)', letterSpacing:.8, textTransform:'uppercase', marginBottom:'1rem' }}>🤖 {t('triagem.mapeamento')}</p>
@@ -533,7 +629,6 @@ export default function App() {
               </div>
             )}
 
-            {/* Progresso */}
             {processando && (
               <div className="glass" style={{ padding:'1.5rem' }}>
                 <p style={{ fontSize:14, fontWeight:600, marginBottom:'1rem' }}>⏳ {t('triagem.processando')}</p>
@@ -570,7 +665,7 @@ export default function App() {
                 <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12 }}>
                   <thead>
                     <tr>
-                      {[t('results.rank'),t('results.nome'),t('results.score'),t('results.classe'),t('results.destaque'),t('results.cargo'),t('results.cidade'),t('results.telefone'),t('results.linkedin'),t('results.acao')].map(h => (
+                      {[t('results.rank'),t('results.nome'),t('results.score'),t('results.classe'),'✨ IA','🤝 Feedback',t('results.cargo'),t('results.cidade'),t('results.telefone'),t('results.acao')].map(h => (
                         <th key={h} style={{ padding:'10px 12px', textAlign:'left', fontSize:10, fontWeight:600, color:'var(--text-muted)', letterSpacing:.8, textTransform:'uppercase', background:'rgba(255,255,255,0.04)', borderBottom:'0.5px solid var(--border)', whiteSpace:'nowrap' }}>{h}</th>
                       ))}
                     </tr>
@@ -583,17 +678,24 @@ export default function App() {
                       const lbl = t(`results.classificacao.${c.classificacao}`) || c.classificacao
                       const wppNum = (c.telefone||'').replace(/\D/g,'')
                       const wppMsg = encodeURIComponent(`Olá, ${(c.nome||'').split(',')[0]}! Minerva Foods — ${pNome}`)
+                      const feedbackAtual = (c.detalhes as any)?.feedback as FeedbackStatus || null
                       return (
                         <tr key={c.id} style={{ borderBottom:'0.5px solid rgba(255,255,255,0.05)' }}>
                           <td style={{ padding:'10px 12px', color:'var(--text-muted)' }}>{c.rank ?? i+1}</td>
                           <td style={{ padding:'10px 12px', fontWeight:500 }}>{c.nome}</td>
                           <td style={{ padding:'10px 12px' }}><ScoreBar value={c.score_total} color={color} /></td>
                           <td style={{ padding:'10px 12px' }}><Badge color={color}>{lbl}</Badge></td>
-                          <td style={{ padding:'10px 12px' }}>{c.destaque ? '⭐' : ''}</td>
+                          <td style={{ padding:'10px 12px' }}>
+                            <JustificativaIA candidato={c} config={{ cargo: pCargo, desc: pDesc }} />
+                          </td>
+                          <td style={{ padding:'10px 12px' }}>
+                            {c.classificacao === 'aprovado' && (
+                              <FeedbackContratacao candidatoId={c.id} feedbackAtual={feedbackAtual} />
+                            )}
+                          </td>
                           <td style={{ padding:'10px 12px', color:'var(--text-muted)' }}>{c.cargo_atual}</td>
                           <td style={{ padding:'10px 12px', color:'var(--text-muted)' }}>{c.cidade}{c.estado ? `, ${c.estado}` : ''}</td>
                           <td style={{ padding:'10px 12px' }}>{c.telefone}</td>
-                          <td style={{ padding:'10px 12px' }}>{c.linkedin_url && c.linkedin_url !== '—' ? <a href={`https://${c.linkedin_url}`} target="_blank" rel="noreferrer" style={{ color:'var(--blue)', fontSize:11 }}>Ver →</a> : <span style={{ color:'var(--text-dim)' }}>—</span>}</td>
                           <td style={{ padding:'10px 12px' }}>
                             {wppNum ? <a href={`https://wa.me/55${wppNum}?text=${wppMsg}`} target="_blank" rel="noreferrer" style={{ padding:'5px 10px', borderRadius:6, fontSize:11, fontWeight:600, background:'rgba(255,255,255,0.08)', color:'var(--text)', border:'0.5px solid var(--border)', textDecoration:'none' }}>💬</a> : null}
                           </td>
@@ -614,7 +716,7 @@ export default function App() {
             <p style={{ fontSize:12, color:'var(--text-muted)', marginBottom:'1.5rem' }}>{t('whatsapp.sub')}</p>
             <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'1.5rem', alignItems:'start' }}>
               <div>
-                {['ap','pot','rep'].map((tipo, i) => (
+                {['ap','pot','rep'].map((tipo) => (
                   <div key={tipo} className="glass" style={{ padding:'1.5rem', marginBottom:'1rem' }}>
                     <p style={{ fontSize:12, fontWeight:600, color:'var(--gold)', letterSpacing:.8, textTransform:'uppercase', marginBottom:'1rem' }}>{t(`whatsapp.msg_${tipo}`)}</p>
                     <textarea rows={5} defaultValue={tipo==='ap'?`Olá, {{nome}}! 😊\n\nSua candidatura para *{{vaga}}* na Minerva Foods foi avaliada positivamente.\n\nGostaríamos de agendar uma conversa. Qual seria a melhor data?\n\nAtt,\n{{responsavel}}\nMinerva Foods`:tipo==='pot'?`Olá, {{nome}}!\n\nSeu perfil para *{{vaga}}* foi adicionado à nossa base de talentos.\n\nAtt,\n{{responsavel}}`:`Olá, {{nome}}.\n\nAgradecemos sua candidatura para *{{vaga}}*. Não seguiremos com seu perfil neste momento.\n\nMinerva Foods`} />
@@ -635,7 +737,7 @@ export default function App() {
                   ))}
                   <div style={{ marginTop:'1rem' }}>
                     <label style={{ fontSize:11, fontWeight:600, color:'var(--gold)', letterSpacing:.8, textTransform:'uppercase', display:'block', marginBottom:6 }}>{t('whatsapp.delay')}</label>
-                    <select><option>2s</option><option selected>5s</option><option>10s</option><option>30s</option></select>
+                    <select><option>2s</option><option>5s</option><option>10s</option><option>30s</option></select>
                   </div>
                   <button style={{ marginTop:'1.25rem', width:'100%', padding:'12px', borderRadius:8, fontSize:13, fontWeight:600, background:'linear-gradient(135deg,#C41E3A,#8B1325)', color:'#fff', border:'none', cursor:'pointer' }}>
                     📤 {t('whatsapp.disparar')}
@@ -668,7 +770,7 @@ export default function App() {
                 <p style={{ fontSize:12, fontWeight:600, color:'var(--gold)', letterSpacing:.8, textTransform:'uppercase', marginBottom:'1rem' }}>⚙️ SISTEMA</p>
                 <div style={{ marginBottom:'1rem' }}>
                   <label style={{ fontSize:11, fontWeight:600, color:'var(--gold)', letterSpacing:.8, textTransform:'uppercase', display:'block', marginBottom:6 }}>{t('config.versao')}</label>
-                  <input value="v1.7.0 — Production Ready" readOnly style={{ opacity:.6 }} />
+                  <input value="v1.8.0 — IA + Feedback Ativo" readOnly style={{ opacity:.6 }} />
                 </div>
                 <div style={{ marginBottom:'1rem' }}>
                   <label style={{ fontSize:11, fontWeight:600, color:'var(--gold)', letterSpacing:.8, textTransform:'uppercase', display:'block', marginBottom:6 }}>{t('config.idioma_sistema')}</label>
