@@ -187,6 +187,8 @@ export default function App() {
   const [d9i2, setD9i2] = useState('Espanhol')
   const [d9n2, setD9n2] = useState('intermediario')
   const [d10cidades, setD10cidades] = useState('')
+  const [d4anosLideranca, setD4anosLideranca] = useState('')
+  const [conhecimentos, setConhecimentos] = useState<string[]>(['','','','',''])
   const [alert, setAlert] = useState<{msg:string;tipo:'success'|'warn'|'info'}|null>(null)
   const [processoId, setProcessoId] = useState<string|null>(null)
   const [keywords, setKeywords] = useState<string[]>([])
@@ -235,7 +237,7 @@ export default function App() {
       limiar_aprovado: limAp,
       limiar_potencial: limPot,
       pesos,
-      config: { d8_eliminatorio: d8elim, d4_ativo: d4ativo, d9_idioma1: d9i1, d9_nivel1: d9n1, d9_idioma2: d9i2, d9_nivel2: d9n2, d10_cidades: d10cidades.split(',').map(s=>s.trim()).filter(Boolean) },
+      config: { d8_eliminatorio: d8elim, d4_ativo: d4ativo, d4_anos_lideranca: d4anosLideranca ? parseInt(d4anosLideranca) : null, conhecimentos_tecnicos: conhecimentos.filter(c=>c.trim()), d9_idioma1: d9i1, d9_nivel1: d9n1, d9_idioma2: d9i2, d9_nivel2: d9n2, d10_cidades: d10cidades.split(',').map(s=>s.trim()).filter(Boolean) },
       idioma: lang as 'pt'|'en'|'es',
     })
     if (p) {
@@ -524,6 +526,58 @@ export default function App() {
                   <input type="number" value={limPot} onChange={e=>setLimPot(+e.target.value)} min={1} max={100} />
                   <p style={{ fontSize:10, color:'var(--text-dim)', marginTop:4 }}>Score ≥ {limPot} pts → ⚡</p>
                 </div>
+              </div>
+            </div>
+
+            {/* ESPECIFICAÇÕES TÉCNICAS */}
+            <div className="glass" style={{ padding:'1.5rem', marginBottom:'1.25rem' }}>
+              <p style={{ fontSize:12, fontWeight:600, color:'var(--gold)', letterSpacing:.8, textTransform:'uppercase', marginBottom:4 }}>🎯 ESPECIFICAÇÕES TÉCNICAS DA VAGA</p>
+              <p style={{ fontSize:11, color:'var(--text-muted)', marginBottom:'1.25rem' }}>Defina critérios específicos que serão considerados na triagem. Deixe em branco os que não se aplicam — os pesos permanecem intactos.</p>
+
+              {/* Liderança */}
+              <div style={{ marginBottom:'1.25rem', padding:'1rem', background:'rgba(255,255,255,0.03)', borderRadius:10, border:'0.5px solid var(--border)' }}>
+                <label style={{ fontSize:11, fontWeight:600, color:'var(--gold)', letterSpacing:.8, textTransform:'uppercase', display:'block', marginBottom:8 }}>D4 — Tempo mínimo em liderança (anos)</label>
+                <div style={{ display:'flex', alignItems:'center', gap:10 }}>
+                  <input
+                    type="number"
+                    value={d4anosLideranca}
+                    onChange={e => setD4anosLideranca(e.target.value)}
+                    placeholder="Ex: 3"
+                    min={0} max={30}
+                    style={{ width:100 }}
+                  />
+                  <span style={{ fontSize:12, color:'var(--text-muted)' }}>anos em posição de liderança</span>
+                </div>
+                <p style={{ fontSize:10, color:'var(--text-dim)', marginTop:6 }}>Deixe em branco para não exigir tempo mínimo.</p>
+              </div>
+
+              {/* Conhecimentos Técnicos */}
+              <div style={{ padding:'1rem', background:'rgba(255,255,255,0.03)', borderRadius:10, border:'0.5px solid var(--border)' }}>
+                <label style={{ fontSize:11, fontWeight:600, color:'var(--gold)', letterSpacing:.8, textTransform:'uppercase', display:'block', marginBottom:8 }}>Conhecimentos Técnicos Desejados</label>
+                <p style={{ fontSize:10, color:'var(--text-dim)', marginBottom:10 }}>Ex: SAP, Power BI, gestão de contratos, derivativos de câmbio, HACCP...</p>
+                <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8 }}>
+                  {conhecimentos.map((k, i) => (
+                    <div key={i} style={{ display:'flex', alignItems:'center', gap:6 }}>
+                      <span style={{ fontSize:10, color:'var(--text-dim)', minWidth:14 }}>{i+1}.</span>
+                      <input
+                        value={k}
+                        onChange={e => {
+                          const novo = [...conhecimentos]
+                          novo[i] = e.target.value
+                          setConhecimentos(novo)
+                        }}
+                        placeholder={`Conhecimento técnico ${i+1}`}
+                        style={{ flex:1 }}
+                      />
+                    </div>
+                  ))}
+                </div>
+                <button
+                  onClick={() => setConhecimentos(c => [...c, ''])}
+                  style={{ marginTop:10, padding:'5px 12px', fontSize:11, borderRadius:6, background:'rgba(201,168,76,0.1)', color:'var(--gold)', border:'0.5px solid rgba(201,168,76,0.3)', cursor:'pointer' }}
+                >
+                  + Adicionar campo
+                </button>
               </div>
             </div>
 
