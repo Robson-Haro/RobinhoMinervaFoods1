@@ -188,7 +188,7 @@ export default function App() {
   const [d9n2, setD9n2] = useState('intermediario')
   const [d10cidades, setD10cidades] = useState('')
   const [d4anosLideranca, setD4anosLideranca] = useState('')
-  const [conhecimentos, setConhecimentos] = useState<string[]>(['','','','',''])
+  const [conhecimentos, setConhecimentos] = useState<string[]>(['','','','','',''])
   const [alert, setAlert] = useState<{msg:string;tipo:'success'|'warn'|'info'}|null>(null)
   const [processoId, setProcessoId] = useState<string|null>(null)
   const [keywords, setKeywords] = useState<string[]>([])
