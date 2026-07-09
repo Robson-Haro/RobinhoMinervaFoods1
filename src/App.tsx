@@ -125,7 +125,6 @@ export default function App() {
           </select>
           <Badge color="201,168,76">v1.7</Badge>
           <Badge color="46,204,113">● Ativo</Badge>
-          <a href="https://minerva-foods-kairos.vercel.app/" target="_blank" rel="noreferrer" style={{ padding:"7px 16px", borderRadius:8, fontSize:12, fontWeight:700, background:"linear-gradient(135deg,#C9A84C,#8B6914)", color:"#fff", textDecoration:"none", letterSpacing:.5, boxShadow:"0 2px 8px rgba(201,168,76,0.4)", border:"0.5px solid rgba(201,168,76,0.5)", whiteSpace:"nowrap" }}>⚡ Acessar Kairós</a>
         </div>
       </header>
 
@@ -137,6 +136,21 @@ export default function App() {
         {navBtn('results', t('nav.results'))}
         {navBtn('whatsapp', t('nav.whatsapp'))}
         {navBtn('config', t('nav.config'))}
+        <div style={{ marginLeft:'auto', display:'flex', alignItems:'center', paddingBottom:4 }}>
+          <a
+            href="https://minerva-foods-kairos.vercel.app/"
+            target="_blank"
+            rel="noreferrer"
+            style={{
+              padding:'7px 20px', borderRadius:8, fontSize:12, fontWeight:700,
+              background:'linear-gradient(135deg,#C9A84C,#8B6914)',
+              color:'#fff', textDecoration:'none', letterSpacing:.5,
+              boxShadow:'0 2px 10px rgba(201,168,76,0.45)',
+              border:'0.5px solid rgba(201,168,76,0.6)',
+              whiteSpace:'nowrap', display:'flex', alignItems:'center', gap:6,
+            }}
+          >⚡ Kairós</a>
+        </div>
       </nav>
 
       <main style={{ padding:'2rem', maxWidth:1400, margin:'0 auto' }}>
