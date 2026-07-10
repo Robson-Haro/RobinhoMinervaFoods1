@@ -150,6 +150,20 @@ export default function App() {
               whiteSpace:'nowrap', display:'flex', alignItems:'center', gap:6,
             }}
           >⚡ Kairós</a>
+          <a
+            href="https://grok.com/"
+            target="_blank"
+            rel="noreferrer"
+            style={{
+              padding:'7px 20px', borderRadius:8, fontSize:12, fontWeight:700,
+              background:'linear-gradient(135deg,#3498DB,#1B5E8A)',
+              color:'#fff', textDecoration:'none', letterSpacing:.5,
+              boxShadow:'0 2px 10px rgba(52,152,219,0.45)',
+              border:'0.5px solid rgba(52,152,219,0.6)',
+              whiteSpace:'nowrap', display:'flex', alignItems:'center', gap:6,
+              marginLeft:8,
+            }}
+          >🌐 Mapeamento Externo</a>
         </div>
       </nav>
 
