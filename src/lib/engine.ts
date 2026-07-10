@@ -11,6 +11,7 @@ export interface ConfigTriagem {
     d8_eliminatorio?: boolean
     d9_idioma1?: string; d9_nivel1?: string; d9_idioma2?: string; d9_nivel2?: string
     d10_cidades?: string[]; d10_tolerancia?: string
+    salario_min?: number; salario_max?: number
   }
 }
 
@@ -113,16 +114,24 @@ function nivelIdioma(txt: string, idioma: string): number {
   for (const [k, v] of Object.entries(NIVEL_IDIOMA)) { if (t.includes(k)) return v }
   return 1
 }
+function idiomaNA(s?: string): boolean {
+  const n = norm(s || '')
+  return !n || n.includes('nao aplicavel') || n.includes('nao exigido')
+}
 function calcD9(cfg: ConfigTriagem, d: DadosCandidato) {
+  if (idiomaNA(cfg.config.d9_idioma1) && idiomaNA(cfg.config.d9_idioma2)) {
+    return { score: 100, detalhe: 'Idiomas: Não Aplicável — dimensão neutra' }
+  }
   const txt = d.idiomas || d.experiencias || ''
   const i1 = cfg.config.d9_idioma1 || 'ingles'
   const n1Min = NIVEL_IDIOMA[norm(cfg.config.d9_nivel1 || 'avancado')] || 3
   const i2 = cfg.config.d9_idioma2 || ''
   const n2Min = NIVEL_IDIOMA[norm(cfg.config.d9_nivel2 || 'intermediario')] || 2
-  const nv1 = nivelIdioma(txt, i1)
-  const nv2 = i2 ? nivelIdioma(txt, i2) : n2Min
-  const s1 = nv1 >= n1Min ? 100 : Math.round((nv1 / n1Min) * 70)
-  const s2 = i2 ? (nv2 >= n2Min ? 100 : Math.round((nv2 / n2Min) * 70)) : 100
+  const na1 = idiomaNA(i1); const na2 = idiomaNA(i2)
+  const nv1 = na1 ? 0 : nivelIdioma(txt, i1)
+  const nv2 = na2 ? 0 : (i2 ? nivelIdioma(txt, i2) : n2Min)
+  const s1 = na1 ? 100 : (nv1 >= n1Min ? 100 : Math.round((nv1 / n1Min) * 70))
+  const s2 = na2 ? 100 : (i2 ? (nv2 >= n2Min ? 100 : Math.round((nv2 / n2Min) * 70)) : 100)
   return { score: Math.round(s1 * 0.6 + s2 * 0.4), detalhe: `${i1}: nível ${nv1}/4${i2 ? ` | ${i2}: nível ${nv2}/4` : ''}` }
 }
 function calcD10(cfg: ConfigTriagem, d: DadosCandidato) {
@@ -146,7 +155,22 @@ export function calcularScore(cfg: ConfigTriagem, d: DadosCandidato): ResultadoS
   if (r8.score === 0 && cfg.config.d8_eliminatorio) {
     return { score_d1:r1.score, score_d2:r2.score, score_d3:r3.score, score_d4:r4.score, score_d5:r5.score, score_d8:0, score_d9:r9.score, score_d10:r10.score, score_total:0, classificacao:'reprovado', destaque:false, detalhes:{d1:r1.detalhe,d2:r2.detalhe,d3:r3.detalhe,d4:r4.detalhe,d5:r5.detalhe,d8:r8.detalhe,d9:r9.detalhe,d10:r10.detalhe,eliminado:'Critério eliminatório: Indústria de Carne'} }
   }
-  const score_total = Math.round((r1.score*p.d1+r2.score*p.d2+r3.score*p.d3+r4.score*p.d4+r5.score*p.d5+r8.score*p.d8+r9.score*p.d9+r10.score*p.d10)/tp)
+  let score_total = Math.round((r1.score*p.d1+r2.score*p.d2+r3.score*p.d3+r4.score*p.d4+r5.score*p.d5+r8.score*p.d8+r9.score*p.d9+r10.score*p.d10)/tp)
+
+  // Faixa salarial — parâmetro de aproximação (nunca penaliza quem não informou)
+  let salDetalhe = 'Pretensão não informada — sem impacto'
+  const sMin = cfg.config.salario_min; const sMax = cfg.config.salario_max
+  if ((sMin || sMax) && d.salario_pret) {
+    const sal = parseFloat(String(d.salario_pret).replace(/[^0-9.,]/g, '').replace(',', '.'))
+    if (!isNaN(sal) && sal > 0) {
+      const min = sMin || 0; const max = sMax || Infinity
+      if (sal >= min && sal <= max) { score_total = Math.min(100, score_total + 3); salDetalhe = `Dentro da faixa (R$ ${sal.toLocaleString('pt-BR')}) — bônus +3` }
+      else if (max !== Infinity && sal > max * 1.15) { score_total = Math.max(0, score_total - 3); salDetalhe = `Acima da faixa (R$ ${sal.toLocaleString('pt-BR')}) — ajuste -3` }
+      else if (sal < min) { score_total = Math.min(100, score_total + 1); salDetalhe = `Abaixo da faixa (R$ ${sal.toLocaleString('pt-BR')}) — bônus +1` }
+      else { salDetalhe = `Próximo da faixa (R$ ${sal.toLocaleString('pt-BR')}) — neutro` }
+    }
+  }
+
   const classificacao = score_total >= cfg.limiar_aprovado ? 'aprovado' : score_total >= cfg.limiar_potencial ? 'potencial' : 'reprovado'
-  return { score_d1:r1.score, score_d2:r2.score, score_d3:r3.score, score_d4:r4.score, score_d5:r5.score, score_d8:r8.score, score_d9:r9.score, score_d10:r10.score, score_total, classificacao, destaque: classificacao==='aprovado' && score_total>=80, detalhes:{d1:r1.detalhe,d2:r2.detalhe,d3:r3.detalhe,d4:r4.detalhe,d5:r5.detalhe,d8:r8.detalhe,d9:r9.detalhe,d10:r10.detalhe} }
+  return { score_d1:r1.score, score_d2:r2.score, score_d3:r3.score, score_d4:r4.score, score_d5:r5.score, score_d8:r8.score, score_d9:r9.score, score_d10:r10.score, score_total, classificacao, destaque: classificacao==='aprovado' && score_total>=80, detalhes:{d1:r1.detalhe,d2:r2.detalhe,d3:r3.detalhe,d4:r4.detalhe,d5:r5.detalhe,d8:r8.detalhe,d9:r9.detalhe,d10:r10.detalhe,salario:salDetalhe} }
 }

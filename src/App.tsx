@@ -39,6 +39,8 @@ export default function App() {
   const [d9i1, setD9i1] = useState('Inglês'); const [d9n1, setD9n1] = useState('avancado')
   const [d9i2, setD9i2] = useState('Espanhol'); const [d9n2, setD9n2] = useState('intermediario')
   const [d10cidades, setD10cidades] = useState('')
+  const [salMin, setSalMin] = useState('')
+  const [salMax, setSalMax] = useState('')
   const [alert, setAlert] = useState<{msg:string;tipo:'success'|'warn'|'info'}|null>(null)
   const [processoId, setProcessoId] = useState<string|null>(null)
   const [keywords, setKeywords] = useState<string[]>([])
@@ -65,7 +67,7 @@ export default function App() {
   }, [pDesc])
 
   const salvarConfig = async () => {
-    const p = await salvarProcesso({ id: processoId||undefined, nome: pNome||'Processo sem nome', responsavel: pResp, cargo_buscado: pCargo, descritivo: pDesc, sensibilidade: pSens, limiar_aprovado: limAp, limiar_potencial: limPot, pesos, config:{ d8_eliminatorio:d8elim, d4_ativo:d4ativo, d9_idioma1:d9i1, d9_nivel1:d9n1, d9_idioma2:d9i2, d9_nivel2:d9n2, d10_cidades:d10cidades.split(',').map(s=>s.trim()).filter(Boolean) }, idioma: lang as 'pt'|'en'|'es' })
+    const p = await salvarProcesso({ id: processoId||undefined, nome: pNome||'Processo sem nome', responsavel: pResp, cargo_buscado: pCargo, descritivo: pDesc, sensibilidade: pSens, limiar_aprovado: limAp, limiar_potencial: limPot, pesos, config:{ d8_eliminatorio:d8elim, d4_ativo:d4ativo, d9_idioma1:d9i1, d9_nivel1:d9n1, d9_idioma2:d9i2, d9_nivel2:d9n2, d10_cidades:d10cidades.split(',').map(s=>s.trim()).filter(Boolean), salario_min:salMin?parseFloat(salMin):undefined, salario_max:salMax?parseFloat(salMax):undefined }, idioma: lang as 'pt'|'en'|'es' })
     if (p) { setProcessoId(p.id); mostrarAlerta(t('common.salvo')) } else mostrarAlerta(t('common.erro'), 'warn')
   }
 
@@ -78,7 +80,7 @@ export default function App() {
   const iniciarTriagem = async () => {
     if (!csvRows.length) return
     setProcessando(true); setProgresso(0)
-    const cfg: ConfigTriagem = { descritivo:pDesc, cargo_buscado:pCargo, sensibilidade:pSens, limiar_aprovado:limAp, limiar_potencial:limPot, pesos, config:{ d8_eliminatorio:d8elim, d4_ativo:d4ativo, d9_idioma1:d9i1, d9_nivel1:d9n1, d9_idioma2:d9i2, d9_nivel2:d9n2, d10_cidades:d10cidades.split(',').map(s=>s.trim()).filter(Boolean) } }
+    const cfg: ConfigTriagem = { descritivo:pDesc, cargo_buscado:pCargo, sensibilidade:pSens, limiar_aprovado:limAp, limiar_potencial:limPot, pesos, config:{ d8_eliminatorio:d8elim, d4_ativo:d4ativo, d9_idioma1:d9i1, d9_nivel1:d9n1, d9_idioma2:d9i2, d9_nivel2:d9n2, d10_cidades:d10cidades.split(',').map(s=>s.trim()).filter(Boolean), salario_min:salMin?parseFloat(salMin):undefined, salario_max:salMax?parseFloat(salMax):undefined } }
     const dadosMap: DadosCandidato[] = csvRows.map(r => mapearCandidato(r, mapeamento))
     const resultados = dadosMap.map((d, i) => { const r = calcularScore(cfg, d); setProgresso(Math.round((i+1)/dadosMap.length*100)); return { ...r, score_custom:{}, ...d, id:String(i), triagem_id:'local', processo_id:'local', wpp_enviado:false, wpp_enviado_at:null, salario_pret:null, dados_brutos:d.dados_brutos, created_at:new Date().toISOString(), rank:i+1 } as unknown as Candidato & {rank:number} })
     try {
@@ -262,16 +264,22 @@ export default function App() {
               <div style={{ marginTop:'1rem' }}>
                 <label style={labelStyle}>D9 — Idioma 1</label>
                 <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8, marginBottom:8 }}>
-                  <select value={d9i1} onChange={e=>setD9i1(e.target.value)}><option>Inglês</option><option>Espanhol</option><option>Francês</option><option>Alemão</option></select>
+                  <select value={d9i1} onChange={e=>setD9i1(e.target.value)}><option>Não Aplicável</option><option>Inglês</option><option>Espanhol</option><option>Francês</option><option>Alemão</option></select>
                   <select value={d9n1} onChange={e=>setD9n1(e.target.value)}><option value="basico">Básico</option><option value="intermediario">Intermediário</option><option value="avancado">Avançado</option><option value="fluente">Fluente</option></select>
                 </div>
                 <label style={labelStyle}>D9 — Idioma 2</label>
                 <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8, marginBottom:8 }}>
-                  <select value={d9i2} onChange={e=>setD9i2(e.target.value)}><option>Espanhol</option><option>Inglês</option><option>Francês</option><option>Não exigido</option></select>
+                  <select value={d9i2} onChange={e=>setD9i2(e.target.value)}><option>Não Aplicável</option><option>Espanhol</option><option>Inglês</option><option>Francês</option></select>
                   <select value={d9n2} onChange={e=>setD9n2(e.target.value)}><option value="basico">Básico</option><option value="intermediario">Intermediário</option><option value="avancado">Avançado</option></select>
                 </div>
                 <label style={labelStyle}>D10 — Cidades aceitas</label>
                 <input value={d10cidades} onChange={e=>setD10cidades(e.target.value)} placeholder="São Paulo, Campinas, Ribeirão Preto..." style={{ marginBottom:8 }} />
+                <label style={labelStyle}>Pretensão Salarial — Faixa de Aproximação (R$)</label>
+                <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8, marginBottom:4 }}>
+                  <input type="number" value={salMin} onChange={e=>setSalMin(e.target.value)} placeholder="Mínimo — ex: 8000" />
+                  <input type="number" value={salMax} onChange={e=>setSalMax(e.target.value)} placeholder="Máximo — ex: 15000" />
+                </div>
+                <p style={{ fontSize:10, color:'var(--text-dim)', marginBottom:8 }}>Parâmetro de aproximação: candidatos dentro da faixa ganham bônus. Quem não informou pretensão NÃO é penalizado.</p>
                 <div style={{ display:'flex', gap:10, marginTop:8 }}>
                   <input type="checkbox" checked={d8elim} onChange={e=>setD8elim(e.target.checked)} id="d8e" style={{ width:'auto' }} />
                   <label htmlFor="d8e" style={{ fontSize:12, cursor:'pointer' }}>D8 — Indústria de carne como critério eliminatório</label>
