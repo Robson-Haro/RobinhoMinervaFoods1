@@ -22,6 +22,27 @@ export default async function handler(req, res) {
       return res.status(r.status).json(data)
     }
 
+    // Buscar vaga específica por ID (v2 com fallback v1)
+    if (action === 'jobinfo') {
+      const jobId = req.query.jobId
+      if (!jobId) return res.status(400).json({ error: 'jobId obrigatório' })
+      // Tentativa 1: API v2 com filtro por ids
+      let r = await fetch(`https://api.gupy.io/api/v2/jobs?ids=${jobId}`, { headers })
+      if (r.ok) {
+        const data = await r.json()
+        const job = (data.results || data.data || [])[0]
+        if (job) return res.status(200).json({ job })
+      }
+      // Tentativa 2: API v1 listagem com id
+      r = await fetch(`${base}/jobs?id=${jobId}`, { headers })
+      if (r.ok) {
+        const data = await r.json()
+        const job = (data.results || data.data || []).find(j => String(j.id) === String(jobId)) || (data.results || data.data || [])[0]
+        if (job) return res.status(200).json({ job })
+      }
+      return res.status(404).json({ error: `Vaga ${jobId} não encontrada. Verifique o ID e as permissões do token.` })
+    }
+
     // Listar etapas de uma vaga
     if (action === 'steps') {
       const jobId = req.query.jobId

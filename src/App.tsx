@@ -63,6 +63,8 @@ export default function App() {
   const [gLoading, setGLoading] = useState(false)
   const [gStatus, setGStatus] = useState('')
   const [gMoveLog, setGMoveLog] = useState<string[]>([])
+  const [gBuscaId, setGBuscaId] = useState('')
+  const [gVagaInfo, setGVagaInfo] = useState<any>(null)
 
   const mudarIdioma = (l: string) => { setLang(l); localStorage.setItem('robinho_lang', l); i18n.changeLanguage(l) }
   const mostrarAlerta = (msg: string, tipo: 'success'|'warn'|'info' = 'success') => { setAlert({ msg, tipo }); setTimeout(() => setAlert(null), 3500) }
@@ -160,6 +162,31 @@ export default function App() {
       setGStatus(`✅ ${lista.length} candidatos triados · ${Object.keys(sel).length} aprovados pré-selecionados`)
     } catch { setGStatus('❌ Falha ao buscar candidatos') }
     setGLoading(false)
+  }
+
+  const gupyBuscarVagaPorId = async () => {
+    if (!gBuscaId.trim()) { setGStatus('⚠️ Digite o número da vaga'); return }
+    setGLoading(true); setGStatus(`Buscando vaga ${gBuscaId} na Gupy...`); setGVagaInfo(null)
+    try {
+      const r = await fetch(`/api/gupy?action=jobinfo&jobId=${gBuscaId.trim()}`)
+      const data = await r.json()
+      if (!r.ok) { setGStatus('❌ ' + (data.error || 'Vaga não encontrada')); setGLoading(false); return }
+      setGVagaInfo(data.job)
+      setGJobId(String(data.job.id))
+      setGStatus(`✅ Vaga encontrada: ${data.job.name}`)
+    } catch { setGStatus('❌ Falha na conexão com a Gupy') }
+    setGLoading(false)
+  }
+
+  const gupyAplicarVagaAosParametros = () => {
+    if (!gVagaInfo) return
+    setPNome(gVagaInfo.name || '')
+    setPCargo(gVagaInfo.roleName || gVagaInfo.role?.name || gVagaInfo.name || '')
+    const desc = [gVagaInfo.description, gVagaInfo.responsibilities, gVagaInfo.prerequisites, gVagaInfo.relevantExperiences]
+      .filter(Boolean).join('\n\n').replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').trim()
+    if (desc) setPDesc(desc)
+    setNav('params')
+    mostrarAlerta('✅ Dados da vaga aplicados aos Parâmetros!')
   }
 
   const gupyMoverSelecionados = async () => {
@@ -528,6 +555,23 @@ export default function App() {
                   </>
                 )}
               </div>
+              <div style={{ display:'flex', gap:8, flexWrap:'wrap', alignItems:'center', marginTop:12, paddingTop:12, borderTop:'0.5px solid var(--border)' }}>
+                <input value={gBuscaId} onChange={e=>setGBuscaId(e.target.value)} placeholder="Ou busque direto pelo número da vaga — ex: 11532042" style={{ flex:1, minWidth:250 }} onKeyDown={e=>{if(e.key==='Enter')gupyBuscarVagaPorId()}} />
+                <button onClick={gupyBuscarVagaPorId} disabled={gLoading} style={{ padding:'10px 18px', borderRadius:8, fontSize:13, fontWeight:600, background:'rgba(255,255,255,0.08)', color:'var(--text)', border:'0.5px solid var(--border)', cursor:'pointer' }}>🔍 Puxar Vaga por ID</button>
+              </div>
+              {gVagaInfo && (
+                <div style={{ marginTop:12, padding:'14px 16px', background:'rgba(46,204,113,0.06)', border:'0.5px solid rgba(46,204,113,0.25)', borderRadius:10 }}>
+                  <p style={{ fontSize:14, fontWeight:600, marginBottom:4 }}>📋 {gVagaInfo.name}</p>
+                  <p style={{ fontSize:11, color:'var(--text-muted)' }}>
+                    ID: {gVagaInfo.id} · {gVagaInfo.type || ''} {gVagaInfo.city ? `· ${gVagaInfo.city}` : ''} {gVagaInfo.status ? `· Status: ${gVagaInfo.status}` : ''}
+                  </p>
+                  {gVagaInfo.description && <p style={{ fontSize:11, color:'var(--text-muted)', marginTop:6, maxHeight:60, overflow:'hidden' }}>{String(gVagaInfo.description).replace(/<[^>]+>/g,' ').slice(0,220)}...</p>}
+                  <div style={{ display:'flex', gap:8, marginTop:10 }}>
+                    <button onClick={gupyAplicarVagaAosParametros} style={{ padding:'8px 16px', borderRadius:8, fontSize:12, fontWeight:600, background:'linear-gradient(135deg,#2ECC71,#1A7A41)', color:'#fff', border:'none', cursor:'pointer' }}>✨ Aplicar aos Parâmetros de Triagem</button>
+                    <button onClick={gupyCarregarCandidatos} disabled={gLoading} style={{ padding:'8px 16px', borderRadius:8, fontSize:12, fontWeight:600, background:'linear-gradient(135deg,#C9A84C,#8B6914)', color:'#fff', border:'none', cursor:'pointer' }}>📥 Importar Candidatos desta Vaga</button>
+                  </div>
+                </div>
+              )}
               {gStatus && <p style={{ fontSize:12, color:'var(--text-muted)', marginTop:10 }} className={gLoading?'pulse':''}>{gStatus}</p>}
               <p style={{ fontSize:10, color:'var(--text-dim)', marginTop:8 }}>⚙️ Requer GUPY_API_TOKEN configurado nas Environment Variables da Vercel. A triagem usa os parâmetros configurados na aba Parâmetros.</p>
             </div>
