@@ -5,7 +5,19 @@ const key = import.meta.env.VITE_SUPABASE_ANON_KEY as string
 
 if (!url || !key) console.warn('[Robinho] Supabase não configurado. Modo offline ativo.')
 
-export const supabase = createClient(url || '', key || '')
+// Cliente defensivo: nunca quebra o app se as variáveis não estiverem configuradas.
+// Sem Supabase, o sistema opera em modo local (triagem funciona, sem persistência).
+function criarClienteSeguro() {
+  if (url && key) {
+    try { return createClient(url, key) } catch (e) { console.warn('[Robinho] Falha ao iniciar Supabase:', e) }
+  }
+  const stub: any = new Proxy({}, {
+    get() { return () => { throw new Error('Supabase não configurado — modo local ativo') } }
+  })
+  return stub
+}
+
+export const supabase = criarClienteSeguro()
 
 export type Processo = {
   id: string; nome: string; responsavel: string; cargo_buscado: string; descritivo: string
