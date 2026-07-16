@@ -189,6 +189,27 @@ export default function App() {
     mostrarAlerta('✅ Dados da vaga aplicados aos Parâmetros!')
   }
 
+  const gupyPuxarParaParametros = async () => {
+    if (!gBuscaId.trim()) { mostrarAlerta('⚠️ Digite o código da vaga', 'warn'); return }
+    setGLoading(true)
+    mostrarAlerta(`🔎 Buscando vaga ${gBuscaId} na Gupy...`, 'info')
+    try {
+      const r = await fetch(`/api/gupy?action=jobinfo&jobId=${gBuscaId.trim()}`)
+      const data = await r.json()
+      if (!r.ok) { mostrarAlerta('❌ ' + (data.error || 'Vaga não encontrada'), 'warn'); setGLoading(false); return }
+      const job = data.job
+      setGVagaInfo(job)
+      setGJobId(String(job.id))
+      setPNome(job.name || '')
+      setPCargo(job.roleName || job.role?.name || job.name || '')
+      const desc = [job.description, job.responsibilities, job.prerequisites, job.relevantExperiences]
+        .filter(Boolean).join('\n\n').replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').trim()
+      if (desc) setPDesc(desc)
+      mostrarAlerta(`✅ Vaga "${job.name}" importada da Gupy!`)
+    } catch { mostrarAlerta('❌ Falha na conexão com a Gupy', 'warn') }
+    setGLoading(false)
+  }
+
   const gupyMoverSelecionados = async () => {
     const ids = Object.entries(gSel).filter(([,v])=>v).map(([k])=>k)
     if (!ids.length || !gStepId) { setGStatus('⚠️ Selecione candidatos e a etapa de destino'); return }
@@ -341,6 +362,15 @@ export default function App() {
             </div>
             <div className="glass" style={{ padding:'1.5rem', marginBottom:'1.25rem' }}>
               {secTitle('📋 INFORMAÇÕES DA VAGA')}
+              <div style={{ display:'flex', gap:8, alignItems:'flex-end', marginBottom:'1rem', padding:'12px 14px', background:'rgba(201,168,76,0.05)', border:'0.5px solid rgba(201,168,76,0.25)', borderRadius:10 }}>
+                <div style={{ flex:1 }}>
+                  <label style={labelStyle}>Código da Vaga (Gupy)</label>
+                  <input value={gBuscaId} onChange={e=>setGBuscaId(e.target.value)} placeholder="Ex: 11532042" onKeyDown={e=>{if(e.key==='Enter')gupyPuxarParaParametros()}} />
+                </div>
+                <button onClick={gupyPuxarParaParametros} disabled={gLoading} style={{ padding:'10px 20px', borderRadius:8, fontSize:13, fontWeight:600, background:'linear-gradient(135deg,#C9A84C,#8B6914)', color:'#fff', border:'none', cursor:'pointer', whiteSpace:'nowrap' }} className={gLoading?'pulse':''}>
+                  {gLoading ? '⏳ Buscando...' : '⬇️ Puxar da Gupy'}
+                </button>
+              </div>
               <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'1rem' }}>
                 {[{label:t('params.processo'),val:pNome,set:setPNome,ph:'Ex: Gerente de Exportações · Minerva Foods'},{label:t('params.responsavel'),val:pResp,set:setPResp,ph:''},{label:t('params.cargo'),val:pCargo,set:setPCargo,ph:'Ex: Gerente de Exportações'}].map((f,i) => (
                   <div key={i}><label style={labelStyle}>{f.label}</label><input value={f.val} onChange={e=>f.set(e.target.value)} placeholder={f.ph} /></div>
