@@ -6,7 +6,7 @@ import { calcularScore, type ConfigTriagem, type DadosCandidato } from './lib/en
 import { salvarProcesso, criarTriagem, salvarCandidatos, listarCandidatos } from './lib/db'
 import { type Candidato } from './lib/supabase'
 
-type Nav = 'dashboard' | 'params' | 'triagem' | 'results' | 'whatsapp' | 'config'
+type Nav = 'dashboard' | 'params' | 'triagem' | 'results' | 'whatsapp' | 'gupy' | 'config'
 type Classificacao = 'aprovado' | 'potencial' | 'reprovado' | 'pendente'
 const PESOS_PADRAO = { d1:20, d2:10, d3:15, d4:10, d5:10, d8:15, d9:10, d10:10 }
 const BADGE_COLORS: Record<string, string> = { aprovado:'46,204,113', potencial:'201,168,76', reprovado:'231,76,60', pendente:'136,135,128' }
@@ -53,6 +53,16 @@ export default function App() {
   const [processando, setProcessando] = useState(false)
   const [candidatos, setCandidatos] = useState<(Candidato & { rank?: number })[]>([])
   const [filtro, setFiltro] = useState<'todos'|Classificacao>('todos')
+  // Estados Gupy
+  const [gJobs, setGJobs] = useState<{id:number;name:string}[]>([])
+  const [gJobId, setGJobId] = useState('')
+  const [gSteps, setGSteps] = useState<{id:number;name:string}[]>([])
+  const [gStepId, setGStepId] = useState('')
+  const [gCands, setGCands] = useState<any[]>([])
+  const [gSel, setGSel] = useState<Record<string, boolean>>({})
+  const [gLoading, setGLoading] = useState(false)
+  const [gStatus, setGStatus] = useState('')
+  const [gMoveLog, setGMoveLog] = useState<string[]>([])
 
   const mudarIdioma = (l: string) => { setLang(l); localStorage.setItem('robinho_lang', l); i18n.changeLanguage(l) }
   const mostrarAlerta = (msg: string, tipo: 'success'|'warn'|'info' = 'success') => { setAlert({ msg, tipo }); setTimeout(() => setAlert(null), 3500) }
@@ -102,6 +112,79 @@ export default function App() {
   const stats = { total:candidatos.length, ap:candidatos.filter(c=>c.classificacao==='aprovado').length, pot:candidatos.filter(c=>c.classificacao==='potencial').length, rep:candidatos.filter(c=>c.classificacao==='reprovado').length, avg:candidatos.length ? Math.round(candidatos.reduce((s,c)=>s+c.score_total,0)/candidatos.length) : 0 }
   const top5 = [...candidatos].sort((a,b)=>b.score_total-a.score_total).slice(0,5)
 
+  // ── Funções Gupy ──
+  const gupyCarregarVagas = async () => {
+    setGLoading(true); setGStatus('Conectando à Gupy...')
+    try {
+      const r = await fetch('/api/gupy?action=jobs')
+      const data = await r.json()
+      if (!r.ok) { setGStatus('❌ ' + (data.error || 'Erro ao conectar')); setGLoading(false); return }
+      const jobs = (data.results || data.data || []).map((j: any) => ({ id: j.id, name: j.name }))
+      setGJobs(jobs)
+      setGStatus(jobs.length ? `✅ ${jobs.length} vagas encontradas` : '⚠️ Nenhuma vaga publicada encontrada')
+    } catch { setGStatus('❌ Falha na conexão') }
+    setGLoading(false)
+  }
+
+  const gupyCarregarCandidatos = async () => {
+    if (!gJobId) return
+    setGLoading(true); setGStatus('Buscando candidatos e etapas...')
+    try {
+      const [rApps, rSteps] = await Promise.all([
+        fetch(`/api/gupy?action=applications&jobId=${gJobId}`),
+        fetch(`/api/gupy?action=steps&jobId=${gJobId}`),
+      ])
+      const apps = await rApps.json(); const steps = await rSteps.json()
+      if (!rApps.ok) { setGStatus('❌ ' + (apps.error || 'Erro')); setGLoading(false); return }
+      setGSteps((steps.results || steps.data || []).map((s: any) => ({ id: s.id, name: s.name })))
+      const cfg: ConfigTriagem = { descritivo:pDesc, cargo_buscado:pCargo, sensibilidade:pSens, limiar_aprovado:limAp, limiar_potencial:limPot, pesos, config:{ d8_eliminatorio:d8elim, d4_ativo:d4ativo, d9_idioma1:d9i1, d9_nivel1:d9n1, d9_idioma2:d9i2, d9_nivel2:d9n2, d10_cidades:d10cidades.split(',').map(s=>s.trim()).filter(Boolean), salario_min:salMin?parseFloat(salMin):undefined, salario_max:salMax?parseFloat(salMax):undefined } }
+      const lista = (apps.results || apps.data || []).map((a: any) => {
+        const cand = a.candidate || a.manualCandidate || {}
+        const d: DadosCandidato = {
+          nome: `${cand.name || ''} ${cand.lastName || ''}`.trim(),
+          telefone: cand.mobileNumber || '',
+          email: cand.email || '',
+          linkedin_url: cand.linkedinProfileUrl || '',
+          cidade: '', estado: '', cargo_atual: '', empresa_atual: '',
+          experiencias: '', formacao: '', idiomas: '', salario_pret: '',
+          dados_brutos: a,
+        }
+        const r = calcularScore(cfg, d)
+        return { ...d, ...r, applicationId: a.id, gupyScore: a.score, stepAtual: a.currentStep?.name || '—' }
+      }).sort((a: any, b: any) => b.score_total - a.score_total)
+      setGCands(lista)
+      // Pré-selecionar aprovados
+      const sel: Record<string, boolean> = {}
+      lista.forEach((c: any) => { if (c.classificacao === 'aprovado') sel[c.applicationId] = true })
+      setGSel(sel)
+      setGStatus(`✅ ${lista.length} candidatos triados · ${Object.keys(sel).length} aprovados pré-selecionados`)
+    } catch { setGStatus('❌ Falha ao buscar candidatos') }
+    setGLoading(false)
+  }
+
+  const gupyMoverSelecionados = async () => {
+    const ids = Object.entries(gSel).filter(([,v])=>v).map(([k])=>k)
+    if (!ids.length || !gStepId) { setGStatus('⚠️ Selecione candidatos e a etapa de destino'); return }
+    const etapa = gSteps.find(s=>String(s.id)===String(gStepId))?.name || 'etapa selecionada'
+    if (!window.confirm(`Confirmar movimentação de ${ids.length} candidato(s) para "${etapa}" na Gupy?\n\nEsta ação será refletida imediatamente na plataforma Gupy.`)) return
+    setGLoading(true); setGMoveLog([])
+    const log: string[] = []
+    for (const appId of ids) {
+      const cand = gCands.find((c:any)=>String(c.applicationId)===String(appId))
+      try {
+        const r = await fetch('/api/gupy?action=move', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ jobId: gJobId, applicationId: appId, stepId: gStepId }),
+        })
+        if (r.ok) log.push(`✅ ${cand?.nome || appId} → ${etapa}`)
+        else { const e = await r.json(); log.push(`❌ ${cand?.nome || appId}: ${e.error || e.detail || 'erro'}`) }
+      } catch { log.push(`❌ ${cand?.nome || appId}: falha de rede`) }
+      setGMoveLog([...log])
+    }
+    setGStatus(`Concluído: ${log.filter(l=>l.startsWith('✅')).length}/${ids.length} movidos com sucesso`)
+    setGLoading(false)
+  }
+
   const S: React.CSSProperties = {}
   const navBtn = (n: Nav, label: string) => (
     <button key={n} onClick={() => setNav(n)} style={{ padding:'8px 16px', borderRadius:'6px 6px 0 0', fontSize:12, fontWeight:500, background:'transparent', border:'none', cursor:'pointer', whiteSpace:'nowrap', letterSpacing:.3, borderBottom:`2px solid ${nav===n?'var(--gold)':'transparent'}`, color:nav===n?'var(--gold)':'var(--text-muted)', transition:'all .18s' }}>{label}</button>
@@ -137,6 +220,7 @@ export default function App() {
         {navBtn('triagem', t('nav.triagem'))}
         {navBtn('results', t('nav.results'))}
         {navBtn('whatsapp', t('nav.whatsapp'))}
+        {navBtn('gupy', '🔗 Gupy')}
         {navBtn('config', t('nav.config'))}
         <div style={{ marginLeft:'auto', display:'flex', alignItems:'center', paddingBottom:4 }}>
           <a
@@ -421,6 +505,87 @@ export default function App() {
                 <button style={{ marginTop:'1.25rem', width:'100%', padding:'12px', borderRadius:8, fontSize:13, fontWeight:600, background:'linear-gradient(135deg,#C41E3A,#8B1325)', color:'#fff', border:'none', cursor:'pointer' }}>📤 {t('whatsapp.disparar')}</button>
               </div>
             </div>
+          </div>
+        )}
+
+        {/* GUPY */}
+        {nav === 'gupy' && (
+          <div className="fade-in">
+            <h1 style={{ fontSize:20, fontWeight:600, marginBottom:4 }}>Integração Gupy — Triagem & Movimentação</h1>
+            <p style={{ fontSize:12, color:'var(--text-muted)', marginBottom:'1.5rem' }}>Importe candidatos direto da Gupy, execute a triagem e mova os aprovados para a próxima etapa com um clique</p>
+
+            <div className="glass" style={{ padding:'1.5rem', marginBottom:'1.25rem' }}>
+              <p style={{ fontSize:12, fontWeight:600, color:'var(--gold)', letterSpacing:.8, textTransform:'uppercase', marginBottom:'1rem' }}>1️⃣ CONEXÃO E VAGA</p>
+              <div style={{ display:'flex', gap:8, flexWrap:'wrap', alignItems:'center' }}>
+                <button onClick={gupyCarregarVagas} disabled={gLoading} style={{ padding:'10px 18px', borderRadius:8, fontSize:13, fontWeight:600, background:'linear-gradient(135deg,#C41E3A,#8B1325)', color:'#fff', border:'none', cursor:'pointer' }}>🔌 Conectar e Listar Vagas</button>
+                {gJobs.length > 0 && (
+                  <>
+                    <select value={gJobId} onChange={e=>setGJobId(e.target.value)} style={{ flex:1, minWidth:250 }}>
+                      <option value="">— Selecione a vaga —</option>
+                      {gJobs.map(j=><option key={j.id} value={j.id}>{j.name}</option>)}
+                    </select>
+                    <button onClick={gupyCarregarCandidatos} disabled={!gJobId||gLoading} style={{ padding:'10px 18px', borderRadius:8, fontSize:13, fontWeight:600, background:'linear-gradient(135deg,#C9A84C,#8B6914)', color:'#fff', border:'none', cursor:'pointer' }}>📥 Importar e Triar Candidatos</button>
+                  </>
+                )}
+              </div>
+              {gStatus && <p style={{ fontSize:12, color:'var(--text-muted)', marginTop:10 }} className={gLoading?'pulse':''}>{gStatus}</p>}
+              <p style={{ fontSize:10, color:'var(--text-dim)', marginTop:8 }}>⚙️ Requer GUPY_API_TOKEN configurado nas Environment Variables da Vercel. A triagem usa os parâmetros configurados na aba Parâmetros.</p>
+            </div>
+
+            {gCands.length > 0 && (
+              <div className="glass" style={{ padding:'1.5rem', marginBottom:'1.25rem' }}>
+                <p style={{ fontSize:12, fontWeight:600, color:'var(--gold)', letterSpacing:.8, textTransform:'uppercase', marginBottom:'1rem' }}>2️⃣ REVISÃO — {gCands.length} CANDIDATOS TRIADOS</p>
+                <div style={{ overflowX:'auto', maxHeight:420, overflowY:'auto' }}>
+                  <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12 }}>
+                    <thead><tr>
+                      <th style={{ padding:'8px 10px', textAlign:'left', fontSize:10, color:'var(--text-muted)', background:'rgba(255,255,255,0.04)', position:'sticky', top:0 }}>MOVER?</th>
+                      <th style={{ padding:'8px 10px', textAlign:'left', fontSize:10, color:'var(--text-muted)', background:'rgba(255,255,255,0.04)', position:'sticky', top:0 }}>NOME</th>
+                      <th style={{ padding:'8px 10px', textAlign:'left', fontSize:10, color:'var(--text-muted)', background:'rgba(255,255,255,0.04)', position:'sticky', top:0 }}>SCORE ROBINHO</th>
+                      <th style={{ padding:'8px 10px', textAlign:'left', fontSize:10, color:'var(--text-muted)', background:'rgba(255,255,255,0.04)', position:'sticky', top:0 }}>CLASSIFICAÇÃO</th>
+                      <th style={{ padding:'8px 10px', textAlign:'left', fontSize:10, color:'var(--text-muted)', background:'rgba(255,255,255,0.04)', position:'sticky', top:0 }}>ETAPA ATUAL (GUPY)</th>
+                      <th style={{ padding:'8px 10px', textAlign:'left', fontSize:10, color:'var(--text-muted)', background:'rgba(255,255,255,0.04)', position:'sticky', top:0 }}>E-MAIL</th>
+                    </tr></thead>
+                    <tbody>
+                      {gCands.map((c:any) => {
+                        const color = BADGE_COLORS[c.classificacao]||'136,135,128'
+                        const lbl = c.classificacao==='aprovado'?'✅ Aprovado':c.classificacao==='potencial'?'⚡ Potencial':'❌ Reprovado'
+                        return (
+                          <tr key={c.applicationId} style={{ borderBottom:'0.5px solid rgba(255,255,255,0.05)' }}>
+                            <td style={{ padding:'8px 10px' }}><input type="checkbox" checked={!!gSel[c.applicationId]} onChange={e=>setGSel(s=>({...s,[c.applicationId]:e.target.checked}))} style={{ width:16, height:16, cursor:'pointer', accentColor:'var(--green)' }} /></td>
+                            <td style={{ padding:'8px 10px', fontWeight:500 }}>{c.nome||'—'}</td>
+                            <td style={{ padding:'8px 10px' }}><ScoreBar value={c.score_total} color={color} /></td>
+                            <td style={{ padding:'8px 10px' }}><Badge color={color}>{lbl}</Badge></td>
+                            <td style={{ padding:'8px 10px', color:'var(--text-muted)' }}>{c.stepAtual}</td>
+                            <td style={{ padding:'8px 10px', color:'var(--text-muted)' }}>{c.email||'—'}</td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {gCands.length > 0 && (
+              <div className="skeu" style={{ padding:'1.5rem' }}>
+                <p style={{ fontSize:12, fontWeight:600, color:'var(--gold)', letterSpacing:.8, textTransform:'uppercase', marginBottom:'1rem' }}>3️⃣ MOVIMENTAÇÃO NA GUPY</p>
+                <div style={{ display:'flex', gap:8, flexWrap:'wrap', alignItems:'center' }}>
+                  <select value={gStepId} onChange={e=>setGStepId(e.target.value)} style={{ flex:1, minWidth:250 }}>
+                    <option value="">— Etapa de destino (ex: Entrevista RH) —</option>
+                    {gSteps.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}
+                  </select>
+                  <button onClick={gupyMoverSelecionados} disabled={gLoading} style={{ padding:'12px 22px', borderRadius:8, fontSize:13, fontWeight:700, background:'linear-gradient(135deg,#2ECC71,#1A7A41)', color:'#fff', border:'none', cursor:'pointer' }}>
+                    🚀 Mover {Object.values(gSel).filter(Boolean).length} Selecionado(s) na Gupy
+                  </button>
+                </div>
+                <p style={{ fontSize:10, color:'var(--text-dim)', marginTop:8 }}>🛡️ Governança: a movimentação exige sua confirmação explícita. O Robinho nunca reprova candidatos automaticamente na Gupy — apenas move aprovados para frente, conforme LGPD.</p>
+                {gMoveLog.length > 0 && (
+                  <div style={{ marginTop:'1rem', maxHeight:180, overflowY:'auto', background:'rgba(0,0,0,0.25)', borderRadius:8, padding:'10px 14px' }}>
+                    {gMoveLog.map((l,i)=><p key={i} style={{ fontSize:11, padding:'2px 0', color: l.startsWith('✅')?'var(--green)':'var(--red-light)' }}>{l}</p>)}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         )}
 
