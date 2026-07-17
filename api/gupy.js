@@ -41,40 +41,55 @@ export default async function handler(req, res) {
       return res.status(r.status).json(data)
     }
 
-    // Buscar vaga específica por ID — busca EXATA com validação
+    // Buscar vaga específica por ID — busca EXATA multiestratégia
     if (action === 'jobinfo') {
       const jobId = String(req.query.jobId || '').trim()
       if (!jobId) return res.status(400).json({ error: 'jobId obrigatório' })
       const bate = (j) => j && (String(j.id) === jobId || String(j.code || '').endsWith('-' + jobId))
+      const extrair = (d) => (d && (d.results || d.data || (Array.isArray(d) ? d : []))) || []
 
-      // Tentativa 1: v2 com filtro ids (validando o resultado)
-      let r = await fetch(`https://api.gupy.io/api/v2/jobs?ids=${jobId}`, { headers })
-      if (r.ok) {
-        const d = await r.json()
-        const job = (d.results || d.data || []).find(bate)
-        if (job) return res.status(200).json({ job })
+      // Estratégias diretas (rápidas)
+      const tentativas = [
+        `https://api.gupy.io/api/v2/jobs/${jobId}`,
+        `https://api.gupy.io/api/v2/jobs?ids[]=${jobId}`,
+        `https://api.gupy.io/api/v2/jobs?ids=${jobId}`,
+        `${base}/jobs/${jobId}`,
+        `${base}/jobs?code=77785-${jobId}`,
+      ]
+      for (const url of tentativas) {
+        try {
+          const r = await fetch(url, { headers })
+          if (!r.ok) continue
+          const d = await r.json()
+          const candidatos = extrair(d)
+          const job = candidatos.length ? candidatos.find(bate) : (bate(d.data || d) ? (d.data || d) : null)
+          if (job) return res.status(200).json({ job, estrategia: url.split('?')[0] })
+        } catch {}
       }
 
-      // Tentativa 2: caminho direto v1 /jobs/{id}
-      r = await fetch(`${base}/jobs/${jobId}`, { headers })
-      if (r.ok) {
-        const d = await r.json()
-        const job = d.data || d
-        if (bate(job)) return res.status(200).json({ job })
-      }
+      // Varredura pelo FIM da lista (vagas mais recentes)
+      try {
+        let r = await fetch(`${base}/jobs?perPage=100&page=1`, { headers })
+        if (r.ok) {
+          const d = await r.json()
+          const total = d.totalCount || d.total || (d.pagination && (d.pagination.total || d.pagination.totalCount)) || 0
+          const ultimaPagina = total ? Math.ceil(total / 100) : 10
+          // varrer as últimas 8 páginas (mais recentes) e as primeiras 2
+          const paginas = []
+          for (let p = ultimaPagina; p > ultimaPagina - 8 && p >= 1; p--) paginas.push(p)
+          if (!paginas.includes(1)) paginas.push(1)
+          for (const page of paginas) {
+            const rp = await fetch(`${base}/jobs?perPage=100&page=${page}`, { headers })
+            if (!rp.ok) continue
+            const dp = await rp.json()
+            const job = extrair(dp).find(bate)
+            if (job) return res.status(200).json({ job, estrategia: `varredura pagina ${page} de ${ultimaPagina}` })
+          }
+          return res.status(404).json({ error: `Vaga ${jobId} não encontrada entre ${total || 'as'} vagas da conta. Confirme o número no painel da Gupy (o ID que aparece na URL ao abrir a vaga).`, totalVagasNaConta: total })
+        }
+      } catch {}
 
-      // Tentativa 3: varrer a lista completa página por página (até 10 páginas de 100)
-      for (let page = 1; page <= 10; page++) {
-        r = await fetch(`${base}/jobs?perPage=100&page=${page}`, { headers })
-        if (!r.ok) break
-        const d = await r.json()
-        const lista = d.results || d.data || []
-        const job = lista.find(bate)
-        if (job) return res.status(200).json({ job })
-        if (lista.length < 100) break
-      }
-
-      return res.status(404).json({ error: `Vaga ${jobId} não encontrada na conta Gupy. Confira o número — pode ser de outra unidade/conta, vaga muito antiga ou o número do anúncio público (diferente do ID interno).` })
+      return res.status(404).json({ error: `Vaga ${jobId} não encontrada. Confirme o número no painel da Gupy.` })
     }
 
     // Listar etapas de uma vaga
