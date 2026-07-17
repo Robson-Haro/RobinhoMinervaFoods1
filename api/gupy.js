@@ -41,25 +41,40 @@ export default async function handler(req, res) {
       return res.status(r.status).json(data)
     }
 
-    // Buscar vaga específica por ID (v2 com fallback v1)
+    // Buscar vaga específica por ID — busca EXATA com validação
     if (action === 'jobinfo') {
-      const jobId = req.query.jobId
+      const jobId = String(req.query.jobId || '').trim()
       if (!jobId) return res.status(400).json({ error: 'jobId obrigatório' })
-      // Tentativa 1: API v2 com filtro por ids
+      const bate = (j) => j && (String(j.id) === jobId || String(j.code || '').endsWith('-' + jobId))
+
+      // Tentativa 1: v2 com filtro ids (validando o resultado)
       let r = await fetch(`https://api.gupy.io/api/v2/jobs?ids=${jobId}`, { headers })
       if (r.ok) {
-        const data = await r.json()
-        const job = (data.results || data.data || [])[0]
+        const d = await r.json()
+        const job = (d.results || d.data || []).find(bate)
         if (job) return res.status(200).json({ job })
       }
-      // Tentativa 2: API v1 listagem com id
-      r = await fetch(`${base}/jobs?id=${jobId}`, { headers })
+
+      // Tentativa 2: caminho direto v1 /jobs/{id}
+      r = await fetch(`${base}/jobs/${jobId}`, { headers })
       if (r.ok) {
-        const data = await r.json()
-        const job = (data.results || data.data || []).find(j => String(j.id) === String(jobId)) || (data.results || data.data || [])[0]
-        if (job) return res.status(200).json({ job })
+        const d = await r.json()
+        const job = d.data || d
+        if (bate(job)) return res.status(200).json({ job })
       }
-      return res.status(404).json({ error: `Vaga ${jobId} não encontrada. Verifique o ID e as permissões do token.` })
+
+      // Tentativa 3: varrer a lista completa página por página (até 10 páginas de 100)
+      for (let page = 1; page <= 10; page++) {
+        r = await fetch(`${base}/jobs?perPage=100&page=${page}`, { headers })
+        if (!r.ok) break
+        const d = await r.json()
+        const lista = d.results || d.data || []
+        const job = lista.find(bate)
+        if (job) return res.status(200).json({ job })
+        if (lista.length < 100) break
+      }
+
+      return res.status(404).json({ error: `Vaga ${jobId} não encontrada na conta Gupy. Confira o número — pode ser de outra unidade/conta, vaga muito antiga ou o número do anúncio público (diferente do ID interno).` })
     }
 
     // Listar etapas de uma vaga
