@@ -67,6 +67,19 @@ export default async function handler(req, res) {
         } catch {}
       }
 
+      // PRIORIDADE: varrer apenas vagas PUBLICADAS (ativas) — rápido e certeiro
+      try {
+        for (let page = 1; page <= 10; page++) {
+          const rp = await fetch(`${base}/jobs?perPage=100&page=${page}&status=published`, { headers })
+          if (!rp.ok) break
+          const dp = await rp.json()
+          const lista = extrair(dp)
+          const job = lista.find(bate)
+          if (job) return res.status(200).json({ job, estrategia: `vagas publicadas pagina ${page}` })
+          if (lista.length < 100) break
+        }
+      } catch {}
+
       // Varredura pelo FIM da lista (vagas mais recentes)
       try {
         let r = await fetch(`${base}/jobs?perPage=100&page=1`, { headers })
