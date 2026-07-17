@@ -22,6 +22,40 @@ export default async function handler(req, res) {
   const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }
   const action = req.query.action
 
+  // Enriquecer vaga com a descrição completa (detalhe v1 → página pública de carreiras)
+  async function enriquecer(job) {
+    if (!job || job.description) return job
+    // Tentativa 1: endpoint de detalhe v1
+    try {
+      const r = await fetch(`${base}/jobs/${job.id}`, { headers })
+      if (r.ok) {
+        const d = await r.json()
+        const full = d.data || d
+        if (full && (full.description || full.responsibilities)) return { ...job, ...full }
+      }
+    } catch {}
+    // Tentativa 2: página pública de carreiras da Minerva (vagas publicadas externas)
+    try {
+      const rp = await fetch(`https://minervafoods.gupy.io/jobs/${job.id}`, { redirect: 'follow' })
+      if (rp.ok) {
+        const html = await rp.text()
+        const un = (s) => { try { return s ? JSON.parse('"' + s + '"').trim() : '' } catch { return '' } }
+        const pega = (campo) => {
+          const m = html.match(new RegExp('"' + campo + '":"((?:[^"\\\\]|\\\\.)*)"'))
+          return m ? un(m[1]) : ''
+        }
+        const description = pega('description')
+        const responsibilities = pega('responsibilities')
+        const prerequisites = pega('prerequisites')
+        const additionalInformation = pega('additionalInformation')
+        if (description || responsibilities || prerequisites) {
+          return { ...job, description, responsibilities, prerequisites, additionalInformation, fonteDescricao: 'pagina publica de carreiras' }
+        }
+      }
+    } catch {}
+    return job
+  }
+
   // Diagnóstico: confirma se a variável chegou ao servidor (sem revelar o valor)
   if (action === 'status') {
     return res.status(200).json({
@@ -63,7 +97,7 @@ export default async function handler(req, res) {
           const d = await r.json()
           const candidatos = extrair(d)
           const job = candidatos.length ? candidatos.find(bate) : (bate(d.data || d) ? (d.data || d) : null)
-          if (job) return res.status(200).json({ job, estrategia: url.split('?')[0] })
+          if (job) return res.status(200).json({ job: await enriquecer(job), estrategia: url.split('?')[0] })
         } catch {}
       }
 
@@ -75,7 +109,7 @@ export default async function handler(req, res) {
           const dp = await rp.json()
           const lista = extrair(dp)
           const job = lista.find(bate)
-          if (job) return res.status(200).json({ job, estrategia: `vagas publicadas pagina ${page}` })
+          if (job) return res.status(200).json({ job: await enriquecer(job), estrategia: `vagas publicadas pagina ${page}` })
           if (lista.length < 100) break
         }
       } catch {}
@@ -96,7 +130,7 @@ export default async function handler(req, res) {
             if (!rp.ok) continue
             const dp = await rp.json()
             const job = extrair(dp).find(bate)
-            if (job) return res.status(200).json({ job, estrategia: `varredura pagina ${page} de ${ultimaPagina}` })
+            if (job) return res.status(200).json({ job: await enriquecer(job), estrategia: `varredura pagina ${page} de ${ultimaPagina}` })
           }
           return res.status(404).json({ error: `Vaga ${jobId} não encontrada entre ${total || 'as'} vagas da conta. Confirme o número no painel da Gupy (o ID que aparece na URL ao abrir a vaga).`, totalVagasNaConta: total })
         }
