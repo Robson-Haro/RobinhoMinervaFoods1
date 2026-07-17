@@ -7,12 +7,31 @@
 export default async function handler(req, res) {
   const token = process.env.GUPY_API_TOKEN
   if (!token) {
-    return res.status(500).json({ error: 'GUPY_API_TOKEN não configurado na Vercel. Vá em Settings → Environment Variables.' })
+    return res.status(500).json({
+      error: 'GUPY_API_TOKEN não configurado na Vercel. Vá em Settings → Environment Variables.',
+      diagnostico: {
+        tokenConfigurado: false,
+        ambiente: process.env.VERCEL_ENV || 'desconhecido',
+        projetoVercel: process.env.VERCEL_PROJECT_PRODUCTION_URL || 'desconhecido',
+        dica: 'A variável deve estar no MESMO projeto Vercel deste link, marcada para Production, e é preciso fazer Redeploy após salvar.'
+      }
+    })
   }
 
   const base = 'https://api.gupy.io/api/v1'
   const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }
   const action = req.query.action
+
+  // Diagnóstico: confirma se a variável chegou ao servidor (sem revelar o valor)
+  if (action === 'status') {
+    return res.status(200).json({
+      tokenConfigurado: true,
+      tamanhoToken: token.length,
+      inicioToken: token.slice(0, 4) + '...',
+      ambiente: process.env.VERCEL_ENV || 'desconhecido',
+      mensagem: '✅ Variável GUPY_API_TOKEN chegou ao servidor com sucesso'
+    })
+  }
 
   try {
     // Listar vagas
