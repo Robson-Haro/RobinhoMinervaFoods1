@@ -155,11 +155,14 @@ export default function App() {
         return { ...d, ...r, applicationId: a.id, gupyScore: a.score, stepAtual: a.currentStep?.name || '—' }
       }).sort((a: any, b: any) => b.score_total - a.score_total)
       setGCands(lista)
+      // Alimentar Dashboard e Resultados com o ranking completo
+      const ranqueados = lista.map((cd: any, i: number) => ({ ...cd, id: String(cd.applicationId), rank: i + 1 }))
+      setCandidatos(ranqueados as any)
       // Pré-selecionar aprovados
       const sel: Record<string, boolean> = {}
       lista.forEach((c: any) => { if (c.classificacao === 'aprovado') sel[c.applicationId] = true })
       setGSel(sel)
-      setGStatus(`✅ ${lista.length} candidatos triados · ${Object.keys(sel).length} aprovados pré-selecionados`)
+      setGStatus(`✅ ${lista.length} candidatos triados · ${Object.keys(sel).length} aprovados pré-selecionados · 📊 Ranking disponível no Dashboard e em Resultados`)
     } catch { setGStatus('❌ Falha ao buscar candidatos') }
     setGLoading(false)
   }
