@@ -12,6 +12,7 @@ export interface ConfigTriagem {
     d9_idioma1?: string; d9_nivel1?: string; d9_idioma2?: string; d9_nivel2?: string
     d10_cidades?: string[]; d10_tolerancia?: string
     salario_min?: number; salario_max?: number
+    conhecimentos?: string[]
   }
 }
 
@@ -51,9 +52,23 @@ function scoreSim(ref: string, alvo: string, sens: Sensibilidade): number {
 
 function calcD1(cfg: ConfigTriagem, d: DadosCandidato) {
   const perfil = [d.cargo_atual, d.empresa_atual, d.experiencias, d.formacao, d.idiomas].filter(Boolean).join(' ')
-  if (!perfil || !cfg.descritivo) return { score: 0, detalhe: 'Sem dados para comparar' }
-  const sim = scoreSim(cfg.descritivo, perfil, cfg.sensibilidade)
-  return { score: Math.min(Math.round(sim * 100), 100), detalhe: `Similaridade: ${(sim * 100).toFixed(1)}%` }
+  const ks = (cfg.config.conhecimentos || []).map(k => k.trim()).filter(Boolean)
+  if (!perfil) return { score: 0, detalhe: 'Sem dados para comparar' }
+  if (!cfg.descritivo && !ks.length) return { score: 0, detalhe: 'Sem descritivo nem conhecimentos configurados' }
+
+  const sim = cfg.descritivo ? scoreSim(cfg.descritivo, perfil, cfg.sensibilidade) : 0
+  let score = Math.round(sim * 100)
+  let detalheK = ''
+
+  if (ks.length) {
+    const perfilN = norm(perfil)
+    const hits = ks.filter(k => perfilN.includes(norm(k)))
+    const kScore = Math.round((hits.length / ks.length) * 100)
+    score = cfg.descritivo ? Math.round(score * 0.6 + kScore * 0.4) : kScore
+    detalheK = ` · Conhecimentos: ${hits.length}/${ks.length}${hits.length ? ' ✓ ' + hits.join(', ') : ''}`
+  }
+
+  return { score: Math.min(score, 100), detalhe: `Similaridade: ${(sim * 100).toFixed(1)}%${detalheK}` }
 }
 function calcD2(_cfg: ConfigTriagem, d: DadosCandidato) {
   const url = d.linkedin_url || ''

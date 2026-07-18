@@ -40,6 +40,7 @@ export default function App() {
   const [d9i2, setD9i2] = useState('Espanhol'); const [d9n2, setD9n2] = useState('intermediario')
   const [d10cidades, setD10cidades] = useState('')
   const [salMin, setSalMin] = useState('')
+  const [conhec, setConhec] = useState<string[]>(['','','','','',''])
   const [salMax, setSalMax] = useState('')
   const [alert, setAlert] = useState<{msg:string;tipo:'success'|'warn'|'info'}|null>(null)
   const [processoId, setProcessoId] = useState<string|null>(null)
@@ -79,7 +80,7 @@ export default function App() {
   }, [pDesc])
 
   const salvarConfig = async () => {
-    const p = await salvarProcesso({ id: processoId||undefined, nome: pNome||'Processo sem nome', responsavel: pResp, cargo_buscado: pCargo, descritivo: pDesc, sensibilidade: pSens, limiar_aprovado: limAp, limiar_potencial: limPot, pesos, config:{ d8_eliminatorio:d8elim, d4_ativo:d4ativo, d9_idioma1:d9i1, d9_nivel1:d9n1, d9_idioma2:d9i2, d9_nivel2:d9n2, d10_cidades:d10cidades.split(',').map(s=>s.trim()).filter(Boolean), salario_min:salMin?parseFloat(salMin):undefined, salario_max:salMax?parseFloat(salMax):undefined }, idioma: lang as 'pt'|'en'|'es' })
+    const p = await salvarProcesso({ id: processoId||undefined, nome: pNome||'Processo sem nome', responsavel: pResp, cargo_buscado: pCargo, descritivo: pDesc, sensibilidade: pSens, limiar_aprovado: limAp, limiar_potencial: limPot, pesos, config:{ d8_eliminatorio:d8elim, d4_ativo:d4ativo, d9_idioma1:d9i1, d9_nivel1:d9n1, d9_idioma2:d9i2, d9_nivel2:d9n2, d10_cidades:d10cidades.split(',').map(s=>s.trim()).filter(Boolean), salario_min:salMin?parseFloat(salMin):undefined, salario_max:salMax?parseFloat(salMax):undefined, conhecimentos:conhec.map(s=>s.trim()).filter(Boolean) }, idioma: lang as 'pt'|'en'|'es' })
     if (p) { setProcessoId(p.id); mostrarAlerta(t('common.salvo')) } else mostrarAlerta(t('common.erro'), 'warn')
   }
 
@@ -92,7 +93,7 @@ export default function App() {
   const iniciarTriagem = async () => {
     if (!csvRows.length) return
     setProcessando(true); setProgresso(0)
-    const cfg: ConfigTriagem = { descritivo:pDesc, cargo_buscado:pCargo, sensibilidade:pSens, limiar_aprovado:limAp, limiar_potencial:limPot, pesos, config:{ d8_eliminatorio:d8elim, d4_ativo:d4ativo, d9_idioma1:d9i1, d9_nivel1:d9n1, d9_idioma2:d9i2, d9_nivel2:d9n2, d10_cidades:d10cidades.split(',').map(s=>s.trim()).filter(Boolean), salario_min:salMin?parseFloat(salMin):undefined, salario_max:salMax?parseFloat(salMax):undefined } }
+    const cfg: ConfigTriagem = { descritivo:pDesc, cargo_buscado:pCargo, sensibilidade:pSens, limiar_aprovado:limAp, limiar_potencial:limPot, pesos, config:{ d8_eliminatorio:d8elim, d4_ativo:d4ativo, d9_idioma1:d9i1, d9_nivel1:d9n1, d9_idioma2:d9i2, d9_nivel2:d9n2, d10_cidades:d10cidades.split(',').map(s=>s.trim()).filter(Boolean), salario_min:salMin?parseFloat(salMin):undefined, salario_max:salMax?parseFloat(salMax):undefined, conhecimentos:conhec.map(s=>s.trim()).filter(Boolean) } }
     const dadosMap: DadosCandidato[] = csvRows.map(r => mapearCandidato(r, mapeamento))
     const resultados = dadosMap.map((d, i) => { const r = calcularScore(cfg, d); setProgresso(Math.round((i+1)/dadosMap.length*100)); return { ...r, score_custom:{}, ...d, id:String(i), triagem_id:'local', processo_id:'local', wpp_enviado:false, wpp_enviado_at:null, salario_pret:null, dados_brutos:d.dados_brutos, created_at:new Date().toISOString(), rank:i+1 } as unknown as Candidato & {rank:number} })
     try {
@@ -139,7 +140,7 @@ export default function App() {
       const apps = await rApps.json(); const steps = await rSteps.json()
       if (!rApps.ok) { setGStatus('❌ ' + (apps.error || 'Erro')); setGLoading(false); return }
       setGSteps((steps.results || steps.data || []).map((s: any) => ({ id: s.id, name: s.name })))
-      const cfg: ConfigTriagem = { descritivo:pDesc, cargo_buscado:pCargo, sensibilidade:pSens, limiar_aprovado:limAp, limiar_potencial:limPot, pesos, config:{ d8_eliminatorio:d8elim, d4_ativo:d4ativo, d9_idioma1:d9i1, d9_nivel1:d9n1, d9_idioma2:d9i2, d9_nivel2:d9n2, d10_cidades:d10cidades.split(',').map(s=>s.trim()).filter(Boolean), salario_min:salMin?parseFloat(salMin):undefined, salario_max:salMax?parseFloat(salMax):undefined } }
+      const cfg: ConfigTriagem = { descritivo:pDesc, cargo_buscado:pCargo, sensibilidade:pSens, limiar_aprovado:limAp, limiar_potencial:limPot, pesos, config:{ d8_eliminatorio:d8elim, d4_ativo:d4ativo, d9_idioma1:d9i1, d9_nivel1:d9n1, d9_idioma2:d9i2, d9_nivel2:d9n2, d10_cidades:d10cidades.split(',').map(s=>s.trim()).filter(Boolean), salario_min:salMin?parseFloat(salMin):undefined, salario_max:salMax?parseFloat(salMax):undefined, conhecimentos:conhec.map(s=>s.trim()).filter(Boolean) } }
       const lista = (apps.results || apps.data || []).map((a: any) => {
         const cand = a.candidate || a.manualCandidate || {}
         const d: DadosCandidato = {
@@ -152,7 +153,7 @@ export default function App() {
           dados_brutos: a,
         }
         const r = calcularScore(cfg, d)
-        return { ...d, ...r, applicationId: a.id, gupyScore: a.score, stepAtual: a.currentStep?.name || '—' }
+        return { ...d, ...r, applicationId: a.id, gupyScore: a.score, stepAtual: a.currentStep?.name || '—', gupyUrl: `https://minervafoods.gupy.io/companies/jobs/${gJobId}/applications/${a.id}` }
       }).sort((a: any, b: any) => b.score_total - a.score_total)
       setGCands(lista)
       // Alimentar Dashboard e Resultados com o ranking completo
@@ -350,6 +351,27 @@ export default function App() {
                 }
               </div>
             </div>
+            {stats.ap > 0 && (
+              <div className="glass" style={{ padding:'1.5rem', marginTop:'1.25rem' }}>
+                <h3 style={{ fontSize:14, fontWeight:600, marginBottom:'1.25rem' }}>🏆 Ranking de Aprovados — maior pontuação primeiro</h3>
+                {[...candidatos].filter(c => c.classificacao === 'aprovado').sort((a, b) => b.score_total - a.score_total).map((c, i) => {
+                  const li = c.linkedin_url && c.linkedin_url !== '—' ? (c.linkedin_url.startsWith('http') ? c.linkedin_url : 'https://' + c.linkedin_url) : ''
+                  const gp = (c as any).gupyUrl || ''
+                  return (
+                    <div key={c.id} style={{ display:'flex', alignItems:'center', gap:12, padding:'10px 0', borderBottom:'0.5px solid var(--border)', flexWrap:'wrap' }}>
+                      <span style={{ fontSize:16, fontWeight:700, color:'var(--gold)', minWidth:32 }}>{i + 1}º</span>
+                      <div style={{ flex:1, minWidth:180 }}>
+                        <div style={{ fontSize:13, fontWeight:600 }}>{c.nome} {c.destaque ? '⭐' : ''}</div>
+                        <div style={{ fontSize:10, color:'var(--text-muted)' }}>{[c.cargo_atual, c.email].filter(Boolean).join(' · ')}</div>
+                      </div>
+                      <span style={{ fontSize:16, fontWeight:700, color:'var(--green)', minWidth:36, textAlign:'right' }}>{c.score_total}</span>
+                      {gp && <a href={gp} target="_blank" rel="noreferrer" style={{ padding:'5px 12px', borderRadius:6, fontSize:11, fontWeight:600, background:'rgba(196,30,58,0.15)', color:'#FF8FA3', border:'0.5px solid rgba(196,30,58,0.35)', textDecoration:'none', whiteSpace:'nowrap' }}>Ver na Gupy →</a>}
+                      {li && <a href={li} target="_blank" rel="noreferrer" style={{ padding:'5px 12px', borderRadius:6, fontSize:11, fontWeight:600, background:'rgba(52,152,219,0.15)', color:'#7EC8E3', border:'0.5px solid rgba(52,152,219,0.35)', textDecoration:'none', whiteSpace:'nowrap' }}>LinkedIn →</a>}
+                    </div>
+                  )
+                })}
+              </div>
+            )}
           </div>
         )}
 
@@ -424,6 +446,15 @@ export default function App() {
                   <input type="number" value={salMax} onChange={e=>setSalMax(e.target.value)} placeholder="Máximo — ex: 15000" />
                 </div>
                 <p style={{ fontSize:10, color:'var(--text-dim)', marginBottom:8 }}>Parâmetro de aproximação: candidatos dentro da faixa ganham bônus. Quem não informou pretensão NÃO é penalizado.</p>
+                <label style={labelStyle}>Conhecimentos Específicos — até 6</label>
+                <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8, marginBottom:4 }}>
+                  {conhec.map((v, i) => (
+                    <input key={i} value={v}
+                      onChange={e => setConhec(arr => arr.map((x, j) => j === i ? e.target.value : x))}
+                      placeholder={['Ex: Relatório GRI', 'Ex: Pegada de Carbono', 'Ex: Excel Avançado', 'Ex: SAP', 'Ex: Auditoria Ambiental', 'Ex: Power BI'][i]} />
+                  ))}
+                </div>
+                <p style={{ fontSize:10, color:'var(--text-dim)', marginBottom:8 }}>Termos buscados no perfil de cada candidato. Cada correspondência aumenta a Aderência (D1) e fica registrada no detalhe do candidato.</p>
                 <div style={{ display:'flex', gap:10, marginTop:8 }}>
                   <input type="checkbox" checked={d8elim} onChange={e=>setD8elim(e.target.checked)} id="d8e" style={{ width:'auto' }} />
                   <label htmlFor="d8e" style={{ fontSize:12, cursor:'pointer' }}>D8 — Indústria de carne como critério eliminatório</label>
