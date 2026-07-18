@@ -171,8 +171,8 @@ export default async function handler(req, res) {
         `https://api.gupy.io/api/v2/jobs/${jobId}`,
         `https://api.gupy.io/api/v2/jobs?ids[]=${jobId}`,
         `https://api.gupy.io/api/v2/jobs?ids=${jobId}`,
-        `${base}/jobs/${jobId}`,
-        `${base}/jobs?code=77785-${jobId}`,
+        `${base}/jobs/${jobId}?fields=all`,
+        `${base}/jobs?code=77785-${jobId}&fields=all`,
       ]
       for (const url of tentativas) {
         try {
