@@ -22,37 +22,58 @@ export default async function handler(req, res) {
   const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }
   const action = req.query.action
 
-  // Enriquecer vaga com a descrição completa (detalhe v1 → página pública de carreiras)
+  // Enriquecer vaga com a descrição completa (detalhe v1 → descoberta de páginas de carreiras → páginas públicas)
   async function enriquecer(job) {
-    if (!job || job.description) return job
-    // Tentativa 1: endpoint de detalhe v1
+    if (!job || (job.description && String(job.description).length > 20)) return job
+
+    const un = (s) => { try { return s ? JSON.parse('"' + s + '"').trim() : '' } catch { return '' } }
+    const pega = (html, campo) => {
+      const m = html.match(new RegExp('"' + campo + '":"((?:[^"\\\\]|\\\\.)*)"'))
+      return m ? un(m[1]) : ''
+    }
+
+    // Tentativa 1: endpoint de detalhe v1 com fields=all
     try {
-      const r = await fetch(`${base}/jobs/${job.id}`, { headers })
+      const r = await fetch(`${base}/jobs/${job.id}?fields=all`, { headers })
       if (r.ok) {
         const d = await r.json()
         const full = d.data || d
-        if (full && (full.description || full.responsibilities)) return { ...job, ...full }
+        if (full && (full.description || full.responsibilities)) return { ...job, ...full, fonteDescricao: 'API detalhe v1' }
       }
     } catch {}
-    // Tentativa 2: página pública de carreiras da Minerva (vagas publicadas externas)
+
+    // Tentativa 2: descobrir TODAS as páginas de carreiras da empresa e priorizar a da vaga
+    let sites = []
     try {
-      const rp = await fetch(`https://minervafoods.gupy.io/jobs/${job.id}`, { redirect: 'follow' })
-      if (rp.ok) {
-        const html = await rp.text()
-        const un = (s) => { try { return s ? JSON.parse('"' + s + '"').trim() : '' } catch { return '' } }
-        const pega = (campo) => {
-          const m = html.match(new RegExp('"' + campo + '":"((?:[^"\\\\]|\\\\.)*)"'))
-          return m ? un(m[1]) : ''
-        }
-        const description = pega('description')
-        const responsibilities = pega('responsibilities')
-        const prerequisites = pega('prerequisites')
-        const additionalInformation = pega('additionalInformation')
-        if (description || responsibilities || prerequisites) {
-          return { ...job, description, responsibilities, prerequisites, additionalInformation, fonteDescricao: 'pagina publica de carreiras' }
-        }
+      const r = await fetch(`${base}/career-pages?fields=all&perPage=100`, { headers })
+      if (r.ok) {
+        const d = await r.json()
+        const paginas = d.results || d.data || []
+        const urlDe = (p) => p.siteUrl || p.url || (p.subdomain ? `https://${p.subdomain}.gupy.io` : null)
+        const propria = paginas.find(p => String(p.id) === String(job.careerPageId))
+        if (propria && urlDe(propria)) sites.push(urlDe(propria))
+        for (const p of paginas) { const u = urlDe(p); if (u && !sites.includes(u)) sites.push(u) }
       }
     } catch {}
+    if (!sites.length) sites = ['https://minervafoods.gupy.io']
+    sites = sites.slice(0, 5)
+
+    // Tentativa 3: ler a descrição da página pública de cada site (a da vaga primeiro)
+    for (const site of sites) {
+      try {
+        const rp = await fetch(`${String(site).replace(/\/$/, '')}/jobs/${job.id}`, { redirect: 'follow' })
+        if (!rp.ok) continue
+        const html = await rp.text()
+        const description = pega(html, 'description')
+        const responsibilities = pega(html, 'responsibilities')
+        const prerequisites = pega(html, 'prerequisites')
+        const additionalInformation = pega(html, 'additionalInformation')
+        if (description || responsibilities || prerequisites) {
+          return { ...job, description, responsibilities, prerequisites, additionalInformation, fonteDescricao: site }
+        }
+      } catch {}
+    }
+
     return job
   }
 
@@ -104,7 +125,7 @@ export default async function handler(req, res) {
       // PRIORIDADE: varrer apenas vagas PUBLICADAS (ativas) — rápido e certeiro
       try {
         for (let page = 1; page <= 10; page++) {
-          const rp = await fetch(`${base}/jobs?perPage=100&page=${page}&status=published`, { headers })
+          const rp = await fetch(`${base}/jobs?perPage=100&page=${page}&status=published&fields=all`, { headers })
           if (!rp.ok) break
           const dp = await rp.json()
           const lista = extrair(dp)
@@ -116,7 +137,7 @@ export default async function handler(req, res) {
 
       // Varredura pelo FIM da lista (vagas mais recentes)
       try {
-        let r = await fetch(`${base}/jobs?perPage=100&page=1`, { headers })
+        let r = await fetch(`${base}/jobs?perPage=100&page=1&fields=all`, { headers })
         if (r.ok) {
           const d = await r.json()
           const total = d.totalCount || d.total || (d.pagination && (d.pagination.total || d.pagination.totalCount)) || 0
@@ -126,7 +147,7 @@ export default async function handler(req, res) {
           for (let p = ultimaPagina; p > ultimaPagina - 8 && p >= 1; p--) paginas.push(p)
           if (!paginas.includes(1)) paginas.push(1)
           for (const page of paginas) {
-            const rp = await fetch(`${base}/jobs?perPage=100&page=${page}`, { headers })
+            const rp = await fetch(`${base}/jobs?perPage=100&page=${page}&fields=all`, { headers })
             if (!rp.ok) continue
             const dp = await rp.json()
             const job = extrair(dp).find(bate)

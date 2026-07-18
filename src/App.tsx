@@ -153,7 +153,7 @@ export default function App() {
           dados_brutos: a,
         }
         const r = calcularScore(cfg, d)
-        return { ...d, ...r, applicationId: a.id, gupyScore: a.score, stepAtual: a.currentStep?.name || '—', gupyUrl: `https://minervafoods.gupy.io/companies/jobs/${gJobId}/applications/${a.id}` }
+        return { ...d, ...r, applicationId: a.id, gupyScore: a.score, stepAtual: a.currentStep?.name || '—', gupyUrl: `https://minervafoods.gupy.io/companies/jobs/${gJobId}/candidates` }
       }).sort((a: any, b: any) => b.score_total - a.score_total)
       setGCands(lista)
       // Alimentar Dashboard e Resultados com o ranking completo
