@@ -139,7 +139,14 @@ export default function App() {
       ])
       const apps = await rApps.json(); const steps = await rSteps.json()
       if (!rApps.ok) { setGStatus('❌ ' + (apps.error || 'Erro')); setGLoading(false); return }
-      setGSteps((steps.results || steps.data || []).map((s: any) => ({ id: s.id, name: s.name })))
+      const etapasProcesso = (steps.results || steps.data || []).filter((s: any) => {
+        const t = String(s.type || '').toLowerCase()
+        const n = String(s.name || '').toLowerCase()
+        // manter apenas etapas reais do processo; excluir status de reprovação/finais
+        return !t.includes('reprov') && !t.includes('disapprov') && !t.includes('rejected') &&
+               !n.includes('reprov') && !n.includes('desist') && !t.includes('hired') && !t.includes('final')
+      })
+      setGSteps(etapasProcesso.map((s: any) => ({ id: s.id, name: s.name + (s.type ? ` (${s.type})` : '') })))
       const cfg: ConfigTriagem = { descritivo:pDesc, cargo_buscado:pCargo, sensibilidade:pSens, limiar_aprovado:limAp, limiar_potencial:limPot, pesos, config:{ d8_eliminatorio:d8elim, d4_ativo:d4ativo, d9_idioma1:d9i1, d9_nivel1:d9n1, d9_idioma2:d9i2, d9_nivel2:d9n2, d10_cidades:d10cidades.split(',').map(s=>s.trim()).filter(Boolean), salario_min:salMin?parseFloat(salMin):undefined, salario_max:salMax?parseFloat(salMax):undefined, conhecimentos:conhec.map(s=>s.trim()).filter(Boolean) } }
       const lista = (apps.results || apps.data || []).map((a: any) => {
         const cand = a.candidate || a.manualCandidate || {}

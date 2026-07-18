@@ -251,7 +251,7 @@ export default async function handler(req, res) {
       const r = await fetch(`${base}/jobs/${jobId}/applications/${applicationId}`, {
         method: 'PATCH',
         headers,
-        body: JSON.stringify({ currentStepId: Number(stepId), status: 'in_process' }),
+        body: JSON.stringify({ currentStepId: Number(stepId) }),
       })
       const data = await r.json()
       return res.status(r.status).json(data)
