@@ -45,8 +45,12 @@ export default async function handler(req, res) {
     // Tentativa 2: descobrir TODAS as páginas de carreiras da empresa e priorizar a da vaga
     let sites = []
     try {
-      const r = await fetch(`${base}/career-pages?fields=all&perPage=100`, { headers })
-      if (r.ok) {
+      let r = null
+      for (const path of ['career-pages', 'careerpages', 'careerPages']) {
+        r = await fetch(`${base}/${path}?fields=all&perPage=100`, { headers })
+        if (r.ok) break
+      }
+      if (r && r.ok) {
         const d = await r.json()
         const paginas = d.results || d.data || []
         const urlDe = (p) => p.siteUrl || p.url || (p.subdomain ? `https://${p.subdomain}.gupy.io` : null)
@@ -94,6 +98,65 @@ export default async function handler(req, res) {
       const r = await fetch(`${base}/jobs?perPage=100&status=published`, { headers })
       const data = await r.json()
       return res.status(r.status).json(data)
+    }
+
+    // RASTREADOR: diagnóstico completo da busca de descrição
+    if (action === 'debugdesc') {
+      const jobId = String(req.query.jobId || '').trim()
+      const trace = []
+      let job = null
+
+      // localizar a vaga nas publicadas
+      for (let page = 1; page <= 10 && !job; page++) {
+        const r = await fetch(`${base}/jobs?perPage=100&page=${page}&status=published&fields=all`, { headers })
+        trace.push({ passo: `listagem publicadas p${page}`, status: r.status })
+        if (!r.ok) break
+        const d = await r.json()
+        const lista = d.results || d.data || []
+        job = lista.find(j => String(j.id) === jobId) || null
+        if (lista.length < 100) break
+      }
+      if (!job) return res.status(200).json({ trace, erro: 'vaga não localizada nas publicadas' })
+      trace.push({ passo: 'vaga localizada', nome: job.name, careerPageId: job.careerPageId, publicationType: job.publicationType, temDescricaoNaListagem: !!job.description })
+
+      // detalhe v1
+      let r = await fetch(`${base}/jobs/${jobId}?fields=all`, { headers })
+      trace.push({ passo: 'detalhe v1 /jobs/{id}', status: r.status })
+      if (r.ok) { try { const d = await r.json(); const full = d.data || d; trace.push({ passo: 'detalhe v1 corpo', temDescricao: !!(full && full.description) }) } catch {} }
+
+      // career pages (3 variações de caminho)
+      let paginas = []
+      for (const path of ['career-pages', 'careerpages', 'careerPages']) {
+        r = await fetch(`${base}/${path}?fields=all&perPage=100`, { headers })
+        trace.push({ passo: `career pages /${path}`, status: r.status })
+        if (r.ok) { try { const d = await r.json(); paginas = d.results || d.data || []; break } catch {} }
+      }
+      const urlDe = (p) => p.siteUrl || p.url || (p.subdomain ? `https://${p.subdomain}.gupy.io` : null)
+      trace.push({ passo: 'paginas descobertas', total: paginas.length, sites: paginas.slice(0, 10).map(p => ({ id: p.id, url: urlDe(p) })) })
+
+      // testar página pública em cada site
+      let sites = []
+      const propria = paginas.find(p => String(p.id) === String(job.careerPageId))
+      if (propria && urlDe(propria)) sites.push(urlDe(propria))
+      for (const p of paginas) { const u = urlDe(p); if (u && !sites.includes(u)) sites.push(u) }
+      if (!sites.length) sites = ['https://minervafoods.gupy.io']
+      sites = sites.slice(0, 5)
+
+      for (const site of sites) {
+        try {
+          const url = `${String(site).replace(/\/$/, '')}/jobs/${jobId}`
+          const rp = await fetch(url, { redirect: 'follow' })
+          const html = rp.ok ? await rp.text() : ''
+          trace.push({
+            passo: 'pagina publica', url, status: rp.status, tamanhoHtml: html.length,
+            contemDescription: html.includes('"description"'),
+            contemJsonLd: html.includes('application/ld+json'),
+            trechoDescription: (html.match(/"description":"([^"]{0,80})/) || [])[1] || null
+          })
+        } catch (e) { trace.push({ passo: 'pagina publica', site, erro: String(e).slice(0, 100) }) }
+      }
+
+      return res.status(200).json({ trace })
     }
 
     // Buscar vaga específica por ID — busca EXATA multiestratégia
