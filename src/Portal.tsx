@@ -75,7 +75,7 @@ export default function Portal() {
       window.scrollTo({ top: 0, behavior: 'smooth' })
       return
     }
-    if (system.href) window.location.assign(system.href)
+    if (system.href) window.open(system.href, '_blank', 'noopener,noreferrer')
   }
 
   return (
@@ -112,7 +112,7 @@ export default function Portal() {
             <span>SELECIONE UMA SOLUÇÃO</span>
             <h2>Seu ecossistema de talentos</h2>
           </div>
-          <p>Todos os caminhos foram organizados para parecerem parte de uma única plataforma.</p>
+          <p>Os sistemas externos abrem em uma nova aba, mantendo este portal disponível para retorno.</p>
         </div>
 
         <div className="systems-grid">
