@@ -283,6 +283,20 @@ export default function App() {
         {navBtn('config', t('nav.config'))}
         <div style={{ marginLeft:'auto', display:'flex', alignItems:'center', paddingBottom:4 }}>
           <a
+            href="https://cronograma-de-vagas.vercel.app/"
+            target="_blank"
+            rel="noreferrer"
+            style={{
+              padding:'7px 20px', borderRadius:8, fontSize:12, fontWeight:700,
+              background:'linear-gradient(135deg,#2ECC71,#1A7A41)',
+              color:'#fff', textDecoration:'none', letterSpacing:.5,
+              boxShadow:'0 2px 10px rgba(46,204,113,0.45)',
+              border:'0.5px solid rgba(46,204,113,0.6)',
+              whiteSpace:'nowrap', display:'flex', alignItems:'center', gap:6,
+              marginRight:8,
+            }}
+          >📅 Planejamento de Seleção</a>
+          <a
             href="https://minerva-foods-kairos.vercel.app/"
             target="_blank"
             rel="noreferrer"
