@@ -61,8 +61,8 @@ export default function Portal() {
   if (enteredRobinho) {
     return (
       <div className="robinho-shell">
-        <button className="portal-return" onClick={() => setEnteredRobinho(false)}>
-          ← Voltar ao Talent Manager
+        <button className="portal-return" onClick={() => setEnteredRobinho(false)} aria-label="Voltar para a página inicial do Talent Manager">
+          <span className="home-icon">⌂</span> HOME
         </button>
         <App />
       </div>
