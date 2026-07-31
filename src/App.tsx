@@ -44,6 +44,7 @@ export default function App() {
   const [salMax, setSalMax] = useState('')
   const [alert, setAlert] = useState<{msg:string;tipo:'success'|'warn'|'info'}|null>(null)
   const [processoId, setProcessoId] = useState<string|null>(null)
+  const [configAtiva, setConfigAtiva] = useState(false)
   const [keywords, setKeywords] = useState<string[]>([])
   const [csvCols, setCsvCols] = useState<string[]>([])
   const [csvRows, setCsvRows] = useState<Record<string,string>[]>([])
@@ -81,7 +82,8 @@ export default function App() {
 
   const salvarConfig = async () => {
     const p = await salvarProcesso({ id: processoId||undefined, nome: pNome||'Processo sem nome', responsavel: pResp, cargo_buscado: pCargo, descritivo: pDesc, sensibilidade: pSens, limiar_aprovado: limAp, limiar_potencial: limPot, pesos, config:{ d8_eliminatorio:d8elim, d4_ativo:d4ativo, d9_idioma1:d9i1, d9_nivel1:d9n1, d9_idioma2:d9i2, d9_nivel2:d9n2, d10_cidades:d10cidades.split(',').map(s=>s.trim()).filter(Boolean), salario_min:salMin?parseFloat(salMin):undefined, salario_max:salMax?parseFloat(salMax):undefined, conhecimentos:conhec.map(s=>s.trim()).filter(Boolean) }, idioma: lang as 'pt'|'en'|'es' })
-    if (p) { setProcessoId(p.id); mostrarAlerta(t('common.salvo')) } else mostrarAlerta(t('common.erro'), 'warn')
+    if (p) { setProcessoId(p.id); setConfigAtiva(true); mostrarAlerta(t('common.salvo')) }
+    else { setConfigAtiva(false); mostrarAlerta(t('common.erro'), 'warn') }
   }
 
   const handleFile = async (file: File) => {
@@ -501,7 +503,7 @@ export default function App() {
               </div>
             </div>
             <div style={{ display:'flex', gap:'.75rem', flexWrap:'wrap' }}>
-              <button onClick={salvarConfig} style={{ padding:'10px 20px', borderRadius:8, fontSize:13, fontWeight:600, background:'linear-gradient(135deg,#C41E3A,#8B1325)', color:'#fff', border:'none', cursor:'pointer' }}>{t('params.salvar')}</button>
+              <button onClick={salvarConfig} style={{ padding:'10px 20px', borderRadius:8, fontSize:13, fontWeight:600, background:configAtiva?'linear-gradient(135deg,#2ECC71,#1A7A41)':'linear-gradient(135deg,#C41E3A,#8B1325)', color:'#fff', border:configAtiva?'1px solid rgba(133,255,181,.55)':'1px solid transparent', boxShadow:configAtiva?'0 0 18px rgba(46,204,113,.38)':'none', cursor:'pointer', transition:'all .25s ease' }}>{configAtiva?'✓ Configuração Ativada':t('params.salvar')}</button>
               <button onClick={()=>{ const k=Object.keys(pesos) as (keyof typeof pesos)[]; const per=Math.floor(100/k.length); const rem=100-per*k.length; const n={} as typeof pesos; k.forEach((key,i)=>{n[key]=per+(i===0?rem:0)}); setPesos(n) }} style={{ padding:'10px 20px', borderRadius:8, fontSize:13, fontWeight:600, background:'rgba(255,255,255,0.08)', color:'var(--text)', border:'0.5px solid var(--border)', cursor:'pointer' }}>{t('params.balancear')}</button>
               <button onClick={()=>setPesos(PESOS_PADRAO)} style={{ padding:'10px 20px', borderRadius:8, fontSize:13, fontWeight:600, background:'rgba(255,255,255,0.08)', color:'var(--text)', border:'0.5px solid var(--border)', cursor:'pointer' }}>{t('params.restaurar')}</button>
             </div>
