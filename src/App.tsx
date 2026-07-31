@@ -81,9 +81,16 @@ export default function App() {
   }, [pDesc])
 
   const salvarConfig = async () => {
-    const p = await salvarProcesso({ id: processoId||undefined, nome: pNome||'Processo sem nome', responsavel: pResp, cargo_buscado: pCargo, descritivo: pDesc, sensibilidade: pSens, limiar_aprovado: limAp, limiar_potencial: limPot, pesos, config:{ d8_eliminatorio:d8elim, d4_ativo:d4ativo, d9_idioma1:d9i1, d9_nivel1:d9n1, d9_idioma2:d9i2, d9_nivel2:d9n2, d10_cidades:d10cidades.split(',').map(s=>s.trim()).filter(Boolean), salario_min:salMin?parseFloat(salMin):undefined, salario_max:salMax?parseFloat(salMax):undefined, conhecimentos:conhec.map(s=>s.trim()).filter(Boolean) }, idioma: lang as 'pt'|'en'|'es' })
-    if (p) { setProcessoId(p.id); setConfigAtiva(true); mostrarAlerta(t('common.salvo')) }
-    else { setConfigAtiva(false); mostrarAlerta(t('common.erro'), 'warn') }
+    // Os valores da tela já são os parâmetros usados pela triagem nesta sessão.
+    // A persistência em nuvem é complementar e não deve impedir a ativação visual.
+    setConfigAtiva(true)
+    mostrarAlerta('✅ Configuração ativada com sucesso!')
+    try {
+      const p = await salvarProcesso({ id: processoId||undefined, nome: pNome||'Processo sem nome', responsavel: pResp, cargo_buscado: pCargo, descritivo: pDesc, sensibilidade: pSens, limiar_aprovado: limAp, limiar_potencial: limPot, pesos, config:{ d8_eliminatorio:d8elim, d4_ativo:d4ativo, d9_idioma1:d9i1, d9_nivel1:d9n1, d9_idioma2:d9i2, d9_nivel2:d9n2, d10_cidades:d10cidades.split(',').map(s=>s.trim()).filter(Boolean), salario_min:salMin?parseFloat(salMin):undefined, salario_max:salMax?parseFloat(salMax):undefined, conhecimentos:conhec.map(s=>s.trim()).filter(Boolean) }, idioma: lang as 'pt'|'en'|'es' })
+      if (p) setProcessoId(p.id)
+    } catch (e) {
+      console.warn('[Robinho] Configuração ativa na sessão; nuvem indisponível.', e)
+    }
   }
 
   const handleFile = async (file: File) => {
