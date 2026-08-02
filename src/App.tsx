@@ -333,7 +333,7 @@ export default function App() {
             }}
           >🎯 Hakol Hunter</a>
           <a
-            href="https://grok.com/"
+            href="https://olho-de-guia.vercel.app/"
             target="_blank"
             rel="noreferrer"
             style={{
@@ -345,7 +345,7 @@ export default function App() {
               whiteSpace:'nowrap', display:'flex', alignItems:'center', gap:6,
               marginLeft:8,
             }}
-          >🌐 Mapeamento Externo</a>
+          >🔎 Eureka</a>
         </div>
       </nav>
 
