@@ -38,11 +38,11 @@ const systems: SystemCard[] = [
     internal: true,
   },
   {
-    name: 'Triagem Externa',
-    eyebrow: 'Mapeamento de mercado',
-    description: 'Acesse o ambiente de pesquisa e triagem para mapeamentos externos.',
-    href: 'https://grok.com/',
-    icon: '◎',
+    name: 'Eureka',
+    eyebrow: 'Busca estratégica',
+    description: 'Localize e organize perfis públicos do LinkedIn para acelerar o hunting de talentos.',
+    href: 'https://olho-de-guia.vercel.app/',
+    icon: 'E',
     tone: 'blue',
   },
   {
@@ -61,7 +61,7 @@ export default function Portal() {
   if (enteredRobinho) {
     return (
       <div className="robinho-shell">
-        <button className="portal-return" onClick={() => setEnteredRobinho(false)} aria-label="Voltar para a página inicial do Talent Manager">
+        <button className="portal-return" onClick={() => setEnteredRobinho(false)} aria-label="Voltar para o Ecossistema de Talent Acquisition Estratégico">
           <span className="home-icon">⌂</span> HOME
         </button>
         <App />
@@ -92,7 +92,9 @@ export default function Portal() {
       <section className="portal-hero">
         <div className="hero-copy">
           <span className="portal-kicker">TALENT ACQUISITION · DIGITAL ECOSYSTEM</span>
-          <h1>Sistema Integrado<br /><strong>Talent Manager</strong></h1>
+          <h1 style={{ fontSize: 'clamp(43px, 6vw, 88px)', letterSpacing: '-4px' }}>
+            Ecossistema de<br /><strong>Talent Acquisition<br />Estratégico</strong>
+          </h1>
           <p>
             Uma experiência única para planejar, encontrar, avaliar e movimentar talentos.
             Escolha o sistema que apoiará sua próxima decisão.
