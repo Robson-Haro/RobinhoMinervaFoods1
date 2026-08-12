@@ -236,9 +236,50 @@ export default async function handler(req, res) {
     if (action === 'applications') {
       const jobId = req.query.jobId
       if (!jobId) return res.status(400).json({ error: 'jobId obrigatório' })
-      const r = await fetch(`${base}/jobs/${jobId}/applications?perPage=100`, { headers })
-      const data = await r.json()
-      return res.status(r.status).json(data)
+
+      // O Robinho só pode triar quem ainda está na etapa inicial "Cadastro".
+      // Resolver o ID pela própria vaga evita depender de um ID fixo, que muda
+      // entre processos seletivos.
+      const normalizar = (valor) => String(valor || '')
+        .normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase()
+      const stepsResponse = await fetch(`${base}/jobs/${jobId}/steps`, { headers })
+      const stepsData = await stepsResponse.json()
+      if (!stepsResponse.ok) return res.status(stepsResponse.status).json(stepsData)
+
+      const steps = stepsData.results || stepsData.data || (Array.isArray(stepsData) ? stepsData : [])
+      const cadastro = steps.find((step) => normalizar(step.name) === 'cadastro')
+      if (!cadastro) {
+        return res.status(422).json({
+          error: 'A etapa "Cadastro" não foi encontrada nesta vaga. Nenhum candidato foi triado por segurança.',
+        })
+      }
+
+      // Paginar toda a vaga antes de filtrar. Assim candidatos em Cadastro não
+      // ficam de fora quando a vaga possui mais de 100 inscrições.
+      const applications = []
+      for (let page = 1; page <= 100; page++) {
+        const r = await fetch(`${base}/jobs/${jobId}/applications?perPage=100&page=${page}`, { headers })
+        const data = await r.json()
+        if (!r.ok) return res.status(r.status).json(data)
+        const pageItems = data.results || data.data || (Array.isArray(data) ? data : [])
+        applications.push(...pageItems)
+        if (pageItems.length < 100) break
+      }
+
+      const cadastroId = String(cadastro.id)
+      const somenteCadastro = applications.filter((application) => {
+        const currentStep = application.currentStep || {}
+        const currentStepId = application.currentStepId ?? application.stepId ?? currentStep.id
+        const currentStepName = application.currentStepName ?? currentStep.name
+        return String(currentStepId || '') === cadastroId || normalizar(currentStepName) === 'cadastro'
+      })
+
+      return res.status(200).json({
+        results: somenteCadastro,
+        totalCount: somenteCadastro.length,
+        sourceTotalCount: applications.length,
+        filteredByStep: { id: cadastro.id, name: cadastro.name },
+      })
     }
 
     // Mover candidatura para outra etapa (somente aprovação, nunca reprovação)
