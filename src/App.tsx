@@ -148,6 +148,12 @@ export default function App() {
       ])
       const apps = await rApps.json(); const steps = await rSteps.json()
       if (!rApps.ok) { setGStatus('❌ ' + (apps.error || 'Erro')); setGLoading(false); return }
+      const normalizarEtapa = (valor: unknown) => String(valor || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase()
+      // Proteção adicional no navegador: mesmo que a API externa mude o formato,
+      // nunca enviar para a triagem alguém fora da etapa Cadastro.
+      const appsCadastro = (apps.results || apps.data || []).filter((a: any) =>
+        normalizarEtapa(a.currentStep?.name || a.currentStepName) === 'cadastro'
+      )
       const etapasProcesso = (steps.results || steps.data || []).filter((s: any) => {
         const t = String(s.type || '').toLowerCase()
         const n = String(s.name || '').toLowerCase()
@@ -157,7 +163,7 @@ export default function App() {
       })
       setGSteps(etapasProcesso.map((s: any) => ({ id: s.id, name: s.name + (s.type ? ` (${s.type})` : '') })))
       const cfg: ConfigTriagem = { descritivo:pDesc, cargo_buscado:pCargo, sensibilidade:pSens, limiar_aprovado:limAp, limiar_potencial:limPot, pesos, config:{ d8_eliminatorio:d8elim, d4_ativo:d4ativo, d9_idioma1:d9i1, d9_nivel1:d9n1, d9_idioma2:d9i2, d9_nivel2:d9n2, d10_cidades:d10cidades.split(',').map(s=>s.trim()).filter(Boolean), salario_min:salMin?parseFloat(salMin):undefined, salario_max:salMax?parseFloat(salMax):undefined, conhecimentos:conhec.map(s=>s.trim()).filter(Boolean) } }
-      const lista = (apps.results || apps.data || []).map((a: any) => {
+      const lista = appsCadastro.map((a: any) => {
         const cand = a.candidate || a.manualCandidate || {}
         const d: DadosCandidato = {
           nome: `${cand.name || ''} ${cand.lastName || ''}`.trim(),
@@ -179,7 +185,7 @@ export default function App() {
       const sel: Record<string, boolean> = {}
       lista.forEach((c: any) => { if (c.classificacao === 'aprovado') sel[c.applicationId] = true })
       setGSel(sel)
-      setGStatus(`✅ ${lista.length} candidatos triados · ${Object.keys(sel).length} aprovados pré-selecionados · 📊 Ranking disponível no Dashboard e em Resultados`)
+      setGStatus(`✅ ${lista.length} candidatos da etapa Cadastro triados · ${Object.keys(sel).length} aprovados pré-selecionados · 📊 Ranking disponível no Dashboard e em Resultados`)
     } catch { setGStatus('❌ Falha ao buscar candidatos') }
     setGLoading(false)
   }
