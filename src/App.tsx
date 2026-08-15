@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import i18n, { LANGS } from './i18n'
 import { parseArquivo, autoMapear, mapearCandidato, exportarCSV } from './lib/parser'
 import { calcularScore, type ConfigTriagem, type DadosCandidato } from './lib/engine'
+import { mapearPerfilGupy } from './lib/gupy-profile'
 import { salvarProcesso, criarTriagem, salvarCandidatos, listarCandidatos } from './lib/db'
 import { type Candidato } from './lib/supabase'
 
@@ -164,16 +165,7 @@ export default function App() {
       setGSteps(etapasProcesso.map((s: any) => ({ id: s.id, name: s.name + (s.type ? ` (${s.type})` : '') })))
       const cfg: ConfigTriagem = { descritivo:pDesc, cargo_buscado:pCargo, sensibilidade:pSens, limiar_aprovado:limAp, limiar_potencial:limPot, pesos, config:{ d8_eliminatorio:d8elim, d4_ativo:d4ativo, d9_idioma1:d9i1, d9_nivel1:d9n1, d9_idioma2:d9i2, d9_nivel2:d9n2, d10_cidades:d10cidades.split(',').map(s=>s.trim()).filter(Boolean), salario_min:salMin?parseFloat(salMin):undefined, salario_max:salMax?parseFloat(salMax):undefined, conhecimentos:conhec.map(s=>s.trim()).filter(Boolean) } }
       const lista = appsCadastro.map((a: any) => {
-        const cand = a.candidate || a.manualCandidate || {}
-        const d: DadosCandidato = {
-          nome: `${cand.name || ''} ${cand.lastName || ''}`.trim(),
-          telefone: cand.mobileNumber || '',
-          email: cand.email || '',
-          linkedin_url: cand.linkedinProfileUrl || '',
-          cidade: '', estado: '', cargo_atual: '', empresa_atual: '',
-          experiencias: '', formacao: '', idiomas: '', salario_pret: '',
-          dados_brutos: a,
-        }
+        const d: DadosCandidato = mapearPerfilGupy(a)
         const r = calcularScore(cfg, d)
         return { ...d, ...r, applicationId: a.id, gupyScore: a.score, stepAtual: a.currentStep?.name || '—', gupyUrl: `https://minervafoods.gupy.io/companies/jobs/${gJobId}/candidates` }
       }).sort((a: any, b: any) => b.score_total - a.score_total)

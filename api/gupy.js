@@ -274,10 +274,39 @@ export default async function handler(req, res) {
         return String(currentStepId || '') === cadastroId || normalizar(currentStepName) === 'cadastro'
       })
 
+      // A listagem v1 de candidaturas traz principalmente dados de contato. O
+      // motor precisa do perfil profissional completo para comparar a pessoa à
+      // vaga. Buscar os candidatos em lote na API v2 evita que experiência,
+      // formação, idiomas e localização sejam enviados vazios ao score.
+      const candidateIds = [...new Set(somenteCadastro.map((application) => {
+        const candidate = application.candidate || application.manualCandidate || {}
+        return application.candidateId ?? candidate.id
+      }).filter(Boolean).map(String))]
+      const profilesById = new Map()
+      for (let offset = 0; offset < candidateIds.length; offset += 50) {
+        const ids = candidateIds.slice(offset, offset + 50)
+        try {
+          const url = `https://api.gupy.io/api/v2/candidates?ids=${encodeURIComponent(ids.join(','))}&maxPageSize=50`
+          const profileResponse = await fetch(url, { headers })
+          if (!profileResponse.ok) continue
+          const profileData = await profileResponse.json()
+          const profiles = profileData.results || profileData.data || (Array.isArray(profileData) ? profileData : [])
+          for (const profile of profiles) profilesById.set(String(profile.id), profile)
+        } catch {}
+      }
+
+      const enriched = somenteCadastro.map((application) => {
+        const candidate = application.candidate || application.manualCandidate || {}
+        const candidateId = application.candidateId ?? candidate.id
+        const candidateProfile = profilesById.get(String(candidateId || '')) || null
+        return { ...application, candidateProfile }
+      })
+
       return res.status(200).json({
-        results: somenteCadastro,
-        totalCount: somenteCadastro.length,
+        results: enriched,
+        totalCount: enriched.length,
         sourceTotalCount: applications.length,
+        enrichedProfiles: profilesById.size,
         filteredByStep: { id: cadastro.id, name: cadastro.name },
       })
     }

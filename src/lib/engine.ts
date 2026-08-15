@@ -34,6 +34,8 @@ function norm(s: string): string {
   return s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim()
 }
 function tokens(s: string): string[] { return [...new Set(norm(s).split(' ').filter(w => w.length > 2))] }
+const STOPWORDS = new Set(['para','com','sem','uma','das','dos','que','por','the','and','with','from','this','will','como','ser','sua','seu','suas','seus','mais','vaga','cargo','area','anos','ano','empresa','profissional','responsavel','responsabilidades','requisitos','desejavel','experiencia'])
+function meaningfulTokens(s: string): string[] { return tokens(s).filter(w => !STOPWORDS.has(w) && w.length > 3) }
 function stem(w: string): string { return w.replace(/(ções|ção|ments?|ings?|ados?|idas?|ores?)$/, '').replace(/(ar|er|ir|es|os|as)$/, '') }
 function similar(a: string, b: string, sens: Sensibilidade): boolean {
   if (a === b) return true
@@ -56,7 +58,18 @@ function calcD1(cfg: ConfigTriagem, d: DadosCandidato) {
   if (!perfil) return { score: 0, detalhe: 'Sem dados para comparar' }
   if (!cfg.descritivo && !ks.length) return { score: 0, detalhe: 'Sem descritivo nem conhecimentos configurados' }
 
-  const sim = cfg.descritivo ? scoreSim(cfg.descritivo, perfil, cfg.sensibilidade) : 0
+  // Não dividir os acertos por todas as palavras do anúncio: textos longos
+  // derrubavam artificialmente candidatos aderentes. Cargo e termos técnicos
+  // recebem coberturas separadas e explicáveis.
+  const titleRef = meaningfulTokens(cfg.cargo_buscado || '')
+  const titleCandidate = meaningfulTokens(d.cargo_atual || d.experiencias || '')
+  const titleHits = titleRef.filter(r => titleCandidate.some(a => similar(r, a, cfg.sensibilidade))).length
+  const titleCoverage = titleRef.length ? titleHits / titleRef.length : 0
+  const jobTerms = meaningfulTokens(cfg.descritivo || '').slice(0, 60)
+  const profileTerms = meaningfulTokens(perfil)
+  const jobHits = jobTerms.filter(r => profileTerms.some(a => similar(r, a, cfg.sensibilidade))).length
+  const jobCoverage = jobTerms.length ? jobHits / Math.min(jobTerms.length, 24) : 0
+  const sim = Math.min(1, titleCoverage * 0.55 + jobCoverage * 0.45)
   let score = Math.round(sim * 100)
   let detalheK = ''
 
@@ -64,7 +77,7 @@ function calcD1(cfg: ConfigTriagem, d: DadosCandidato) {
     const perfilN = norm(perfil)
     const hits = ks.filter(k => perfilN.includes(norm(k)))
     const kScore = Math.round((hits.length / ks.length) * 100)
-    score = cfg.descritivo ? Math.round(score * 0.6 + kScore * 0.4) : kScore
+    score = cfg.descritivo ? Math.round(score * 0.65 + kScore * 0.35) : kScore
     detalheK = ` · Conhecimentos: ${hits.length}/${ks.length}${hits.length ? ' ✓ ' + hits.join(', ') : ''}`
   }
 
