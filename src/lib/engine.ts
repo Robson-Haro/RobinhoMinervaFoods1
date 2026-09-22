@@ -1,5 +1,16 @@
 export type Sensibilidade = 'strict' | 'normal' | 'flex'
 
+export interface ExperienciaProfissional {
+  cargo?: string
+  empresa?: string
+  atividades?: string
+  inicioAno?: number
+  inicioMes?: number
+  fimAno?: number
+  fimMes?: number
+  atual?: boolean
+}
+
 export interface ConfigTriagem {
   descritivo: string; cargo_buscado: string; sensibilidade: Sensibilidade
   limiar_aprovado: number; limiar_potencial: number
@@ -8,11 +19,20 @@ export interface ConfigTriagem {
     d3_cargo?: string; d3_tempo_min?: number; d3_penalizar?: boolean
     d4_ativo?: boolean; d4_tempo_min?: number
     d5_formacoes?: string[]; d5_nivel_min?: string
-    d8_eliminatorio?: boolean
+    d8_ativo?: boolean; d8_eliminatorio?: boolean
     d9_idioma1?: string; d9_nivel1?: string; d9_idioma2?: string; d9_nivel2?: string
     d10_cidades?: string[]; d10_tolerancia?: string
     salario_min?: number; salario_max?: number
+    /** Conhecimentos preferenciais: mantido por compatibilidade. */
     conhecimentos?: string[]
+    /** Requisitos eliminatórios, com alternativas separadas por "|". */
+    conhecimentos_obrigatorios?: string[]
+    minimo_conhecimentos_obrigatorios?: number
+    /** Títulos aceitos como alternativas ao cargo-alvo. */
+    cargos_compativeis?: string[]
+    /** Impede aprovação quando o título/carreira não comprovam a função-alvo. */
+    cargo_obrigatorio?: boolean
+    termos_excluidos?: string[]
   }
 }
 
@@ -20,7 +40,8 @@ export interface DadosCandidato {
   nome?: string; telefone?: string; email?: string; linkedin_url?: string
   cidade?: string; estado?: string; cargo_atual?: string; empresa_atual?: string
   experiencias?: string; formacao?: string; idiomas?: string; salario_pret?: string
-  dados_brutos: Record<string, string>
+  historico?: ExperienciaProfissional[]
+  dados_brutos: Record<string, unknown>
 }
 
 export interface ResultadoScore {
@@ -30,175 +51,186 @@ export interface ResultadoScore {
   destaque: boolean; detalhes: Record<string, string>
 }
 
-function norm(s: string): string {
-  return s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim()
+type GateCargo = { ativo: boolean; atende: boolean; detalhes: string; titulosAderentes: string[] }
+type GateConhecimentos = { atende: boolean; total: number; encontrados: string[]; faltantes: string[]; detalhes: string }
+
+function norm(value: unknown): string {
+  return String(value || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim()
 }
-function tokens(s: string): string[] { return [...new Set(norm(s).split(' ').filter(w => w.length > 2))] }
-const STOPWORDS = new Set(['para','com','sem','uma','das','dos','que','por','the','and','with','from','this','will','como','ser','sua','seu','suas','seus','mais','vaga','cargo','area','anos','ano','empresa','profissional','responsavel','responsabilidades','requisitos','desejavel','experiencia'])
-function meaningfulTokens(s: string): string[] { return tokens(s).filter(w => !STOPWORDS.has(w) && w.length > 3) }
-function stem(w: string): string { return w.replace(/(ções|ção|ments?|ings?|ados?|idas?|ores?)$/, '').replace(/(ar|er|ir|es|os|as)$/, '') }
-function similar(a: string, b: string, sens: Sensibilidade): boolean {
+function tokens(value: unknown): string[] { return [...new Set(norm(value).split(' ').filter(Boolean))] }
+function unique(values: string[]): string[] { return [...new Set(values.map(value => value.trim()).filter(Boolean))] }
+
+const STOPWORDS = new Set(['para','com','sem','uma','das','dos','que','por','the','and','with','from','this','will','como','ser','sua','seu','suas','seus','mais','vaga','cargo','area','anos','ano','empresa','profissional','responsavel','responsabilidades','requisitos','desejavel','experiencia','atividades','conhecimento','conhecimentos','necessario','necessaria','atuar','atuacao','sobre','entre','pela','pelo','nas','nos','um','ou','de','da','do','em','na','no','a','o','e'])
+const GENERIC_TITLE = new Set([...STOPWORDS,'analista','assistente','auxiliar','especialista','coordenador','coordenadora','gerente','gestor','gestora','supervisor','supervisora','consultor','consultora','tecnico','tecnica','diretor','diretora','head','manager','lider','leader','senior','seniora','junior','jr','sr','pleno','trainee','estagiario','estagiaria'])
+const LIDER_KW = ['gerente','gestor','manager','head','director','diretora','diretor','coordenador','supervisor','lider','leader','vice']
+const CARNE_KW = ['frigorifico','bovino','suino','frango','carnes','jbs','marfrig','brf','minerva','meatpacking','beef','pork','poultry','abatedouro','carne']
+const ALIM_KW = ['alimentos','food','bebidas','laticinios','nestle','unilever','ambev','danone','fmcg','consumo']
+const NIVEL_ORDER = ['tecnico','medio','superior','pos','mba','especializacao','mestrado','doutorado','phd']
+const NIVEL_MAP: Record<string, number> = { qualquer: 0, tecnico: 1, medio: 1, superior: 2, pos: 3, mba: 3, especializacao: 3, mestrado: 4, doutorado: 5, phd: 5 }
+const NIVEL_IDIOMA: Record<string, number> = { basico: 1, basic: 1, basica: 1, intermediario: 2, intermediate: 2, intermedio: 2, avancado: 3, advanced: 3, avanzado: 3, fluente: 4, fluent: 4, nativo: 4, native: 4 }
+
+function meaningfulTokens(value: unknown): string[] { return tokens(value).filter(word => word.length > 3 && !STOPWORDS.has(word)) }
+function roleTerms(value: unknown): string[] { return tokens(value).filter(word => word.length > 2 && !GENERIC_TITLE.has(word)) }
+function stem(word: string): string { return word.replace(/(coes|cao|ments?|ings?|ados?|idas?|ores?)$/, '').replace(/(ar|er|ir|es|os|as)$/, '') }
+function similar(a: string, b: string, sensibilidade: Sensibilidade): boolean {
   if (a === b) return true
-  if (sens === 'strict') return false
-  if (a.startsWith(b.slice(0, 5)) || b.startsWith(a.slice(0, 5))) return true
-  if (sens === 'flex') return stem(a) === stem(b)
-  return false
+  if (sensibilidade === 'strict') return false
+  if (a.length >= 5 && b.length >= 5 && (a.startsWith(b.slice(0, 5)) || b.startsWith(a.slice(0, 5)))) return true
+  return sensibilidade === 'flex' && stem(a) === stem(b)
 }
-function scoreSim(ref: string, alvo: string, sens: Sensibilidade): number {
-  const tRef = tokens(ref); const tAlvo = tokens(alvo)
-  if (!tRef.length) return 0
-  let hits = 0
-  for (const r of tRef) { if (tAlvo.some(a => similar(r, a, sens))) hits++ }
-  return Math.round((hits / tRef.length) * 100) / 100
+/** Comparação própria para filtros eliminatórios: não usa aproximação por prefixo. */
+function sameRoleTerm(a: string, b: string): boolean { return a === b || (a.length >= 5 && b.length >= 5 && a.replace(/s$/, '') === b.replace(/s$/, '')) }
+function roleCompatible(candidato: string, esperado: string): boolean {
+  const alvo = roleTerms(esperado); const atual = roleTerms(candidato)
+  return alvo.length > 0 && alvo.every(termo => atual.some(valor => sameRoleTerm(termo, valor)))
+}
+function contemExpressao(texto: unknown, termo: unknown, sensibilidade: Sensibilidade): boolean {
+  const fonte = norm(texto); const alvo = norm(termo)
+  if (!fonte || !alvo) return false
+  // Espaços nas extremidades evitam falsos positivos como "SAP" em "sapo".
+  if (` ${fonte} `.includes(` ${alvo} `)) return true
+  // Siglas com números mudam de grafia com frequência (S/4HANA, S4 HANA, S4HANA).
+  const compactoAlvo = alvo.replace(/\s/g, ''); const compactoFonte = fonte.replace(/\s/g, '')
+  if (/\d/.test(compactoAlvo) && compactoFonte.includes(compactoAlvo)) return true
+  const partes = meaningfulTokens(alvo); const disponiveis = tokens(fonte)
+  return partes.length > 0 && partes.every(parte => disponiveis.some(valor => valor === parte || valueIsPluralOf(valor, parte) || similar(parte, valor, sensibilidade)))
+}
+function valueIsPluralOf(value: string, singular: string): boolean { return singular.length >= 3 && (value === singular + 's' || singular === value + 's') }
+function configSeguro(cfg: ConfigTriagem): ConfigTriagem['config'] { return cfg.config || {} }
+function titulosDoCandidato(d: DadosCandidato): string[] { return [d.cargo_atual, ...(d.historico || []).map(item => item.cargo)].map(value => String(value || '').trim()).filter(Boolean) }
+function evidenciaProfissional(d: DadosCandidato): string { return [d.cargo_atual, d.experiencias, ...(d.historico || []).map(item => [item.cargo, item.empresa, item.atividades].filter(Boolean).join(' '))].filter(Boolean).join(' · ') }
+function perfilCompleto(d: DadosCandidato): string { return [evidenciaProfissional(d), d.formacao, d.idiomas].filter(Boolean).join(' · ') }
+
+function avaliarCargo(cfg: ConfigTriagem, d: DadosCandidato): GateCargo {
+  const config = configSeguro(cfg)
+  const alvo = config.d3_cargo || cfg.cargo_buscado
+  const cargosAceitos = unique([alvo, ...(config.cargos_compativeis || [])].filter(Boolean))
+  const termosAlvo = cargosAceitos.flatMap(roleTerms)
+  const ativo = config.cargo_obrigatorio !== false && termosAlvo.length > 0
+  if (!ativo) return { ativo: false, atende: true, detalhes: 'Cargo obrigatório não configurado', titulosAderentes: [] }
+  const titulos = titulosDoCandidato(d)
+  const titulosAderentes = titulos.filter(titulo => cargosAceitos.some(referencia => roleCompatible(titulo, referencia)))
+  const termosExcluidos = (config.termos_excluidos || []).filter(termo => contemExpressao(evidenciaProfissional(d), termo, cfg.sensibilidade))
+  if (termosExcluidos.length) return { ativo, atende: false, detalhes: `Termo de exclusão encontrado: ${termosExcluidos.join(', ')}`, titulosAderentes: [] }
+  if (!titulos.length) return { ativo, atende: false, detalhes: 'Sem cargo ou histórico profissional para validar a função-alvo', titulosAderentes: [] }
+  return titulosAderentes.length
+    ? { ativo, atende: true, detalhes: `Título compatível: ${titulosAderentes.join(' | ')}`, titulosAderentes }
+    : { ativo, atende: false, detalhes: `Cargo/família divergente. Esperado: ${cargosAceitos.join(' ou ')}`, titulosAderentes: [] }
+}
+
+function alternativas(requisito: string): string[] { return requisito.split(/\s*\|\s*|\s+ou\s+/i).map(item => item.trim()).filter(Boolean) }
+function avaliarConhecimentos(cfg: ConfigTriagem, d: DadosCandidato): GateConhecimentos {
+  const config = configSeguro(cfg)
+  const requisitos = unique(config.conhecimentos_obrigatorios || [])
+  if (!requisitos.length) return { atende: true, total: 0, encontrados: [], faltantes: [], detalhes: 'Sem conhecimento eliminatório configurado' }
+  const evidencia = evidenciaProfissional(d)
+  const encontrados: string[] = []; const faltantes: string[] = []
+  for (const requisito of requisitos) {
+    const achado = alternativas(requisito).find(alternativa => contemExpressao(evidencia, alternativa, cfg.sensibilidade))
+    if (achado) encontrados.push(achado); else faltantes.push(requisito)
+  }
+  const minimo = Math.max(1, Math.min(requisitos.length, config.minimo_conhecimentos_obrigatorios || requisitos.length))
+  const atende = encontrados.length >= minimo
+  return { atende, total: requisitos.length, encontrados, faltantes, detalhes: `Requisitos comprovados: ${encontrados.length}/${requisitos.length}${faltantes.length ? ` · Faltantes: ${faltantes.join(', ')}` : ''}` }
 }
 
 function calcD1(cfg: ConfigTriagem, d: DadosCandidato) {
-  const perfil = [d.cargo_atual, d.empresa_atual, d.experiencias, d.formacao, d.idiomas].filter(Boolean).join(' ')
-  const ks = (cfg.config.conhecimentos || []).map(k => k.trim()).filter(Boolean)
+  const perfil = perfilCompleto(d)
+  const preferencias = (configSeguro(cfg).conhecimentos || []).map(item => item.trim()).filter(Boolean)
   if (!perfil) return { score: 0, detalhe: 'Sem dados para comparar' }
-  if (!cfg.descritivo && !ks.length) return { score: 0, detalhe: 'Sem descritivo nem conhecimentos configurados' }
-
-  // Não dividir os acertos por todas as palavras do anúncio: textos longos
-  // derrubavam artificialmente candidatos aderentes. Cargo e termos técnicos
-  // recebem coberturas separadas e explicáveis.
-  const titleRef = meaningfulTokens(cfg.cargo_buscado || '')
-  const titleCandidate = meaningfulTokens(d.cargo_atual || d.experiencias || '')
-  const titleHits = titleRef.filter(r => titleCandidate.some(a => similar(r, a, cfg.sensibilidade))).length
-  const titleCoverage = titleRef.length ? titleHits / titleRef.length : 0
-  const jobTerms = meaningfulTokens(cfg.descritivo || '').slice(0, 60)
-  const profileTerms = meaningfulTokens(perfil)
-  const jobHits = jobTerms.filter(r => profileTerms.some(a => similar(r, a, cfg.sensibilidade))).length
-  const jobCoverage = jobTerms.length ? jobHits / Math.min(jobTerms.length, 24) : 0
-  const sim = Math.min(1, titleCoverage * 0.55 + jobCoverage * 0.45)
-  let score = Math.round(sim * 100)
-  let detalheK = ''
-
-  if (ks.length) {
-    const perfilN = norm(perfil)
-    const hits = ks.filter(k => perfilN.includes(norm(k)))
-    const kScore = Math.round((hits.length / ks.length) * 100)
-    score = cfg.descritivo ? Math.round(score * 0.65 + kScore * 0.35) : kScore
-    detalheK = ` · Conhecimentos: ${hits.length}/${ks.length}${hits.length ? ' ✓ ' + hits.join(', ') : ''}`
-  }
-
-  return { score: Math.min(score, 100), detalhe: `Similaridade: ${(sim * 100).toFixed(1)}%${detalheK}` }
+  const tituloAlvo = meaningfulTokens(cfg.cargo_buscado)
+  const tituloCandidato = meaningfulTokens([d.cargo_atual, ...(d.historico || []).map(item => item.cargo)].filter(Boolean).join(' '))
+  const coberturaLiteral = tituloAlvo.length ? tituloAlvo.filter(termo => tituloCandidato.some(valor => similar(termo, valor, cfg.sensibilidade))).length / tituloAlvo.length : 0
+  // Um título explicitamente cadastrado como equivalente é evidência forte e
+  // não deve perder para a simples diferença de nomenclatura (ex.: Analista SAP).
+  const gateCargo = avaliarCargo(cfg, d)
+  const coberturaTitulo = gateCargo.ativo && gateCargo.atende ? Math.max(coberturaLiteral, 0.85) : coberturaLiteral
+  const termosVaga = unique(meaningfulTokens(cfg.descritivo)).slice(0, 24)
+  const termosPerfil = meaningfulTokens(perfil)
+  const coberturaVaga = termosVaga.length ? termosVaga.filter(termo => termosPerfil.some(valor => similar(termo, valor, cfg.sensibilidade))).length / termosVaga.length : 0
+  const base = Math.round(Math.min(1, coberturaTitulo * 0.65 + coberturaVaga * 0.35) * 100)
+  if (!preferencias.length) return { score: base, detalhe: `Aderência de título: ${(coberturaTitulo * 100).toFixed(0)}% · Contexto da vaga: ${(coberturaVaga * 100).toFixed(0)}%` }
+  const encontrados = preferencias.filter(termo => contemExpressao(evidenciaProfissional(d), termo, cfg.sensibilidade))
+  const conhecimento = Math.round((encontrados.length / preferencias.length) * 100)
+  return { score: Math.round(base * 0.7 + conhecimento * 0.3), detalhe: `Aderência: ${base}% · Preferenciais: ${encontrados.length}/${preferencias.length}${encontrados.length ? ` (${encontrados.join(', ')})` : ''}` }
 }
-function calcD2(_cfg: ConfigTriagem, d: DadosCandidato) {
-  const url = d.linkedin_url || ''
-  if (!url || url === '—' || !url.includes('linkedin')) return { score: 0, detalhe: 'Sem perfil LinkedIn' }
-  return { score: 70, detalhe: 'Perfil LinkedIn presente' }
+/** LinkedIn é evidência de contato, não mérito profissional. */
+function calcD2(_cfg: ConfigTriagem, d: DadosCandidato) { return { score: 100, detalhe: d.linkedin_url ? 'LinkedIn informado — critério neutro' : 'LinkedIn não informado — critério neutro' } }
+function mesesDaExperiencia(item: ExperienciaProfissional): number | null {
+  if (!item.inicioAno) return null
+  const inicio = item.inicioAno * 12 + Math.max(1, item.inicioMes || 1)
+  const hoje = new Date()
+  const fim = item.atual || !item.fimAno ? hoje.getFullYear() * 12 + hoje.getMonth() + 1 : item.fimAno * 12 + Math.max(1, item.fimMes || 12)
+  return Math.max(1, Math.min(600, fim - inicio + 1))
 }
-function calcD3(cfg: ConfigTriagem, d: DadosCandidato) {
-  const exp = norm(d.experiencias || d.cargo_atual || '')
-  const cargo = norm(cfg.config.d3_cargo || cfg.cargo_buscado || '')
-  const tempoMin = cfg.config.d3_tempo_min || 3
-  if (!exp) return cfg.config.d3_penalizar ? { score: 0, detalhe: 'Sem histórico — penalizado' } : { score: 30, detalhe: 'Sem histórico' }
-  const temCargo = cargo.split(' ').some(t => t.length > 3 && exp.includes(t))
-  const matchAnos = exp.match(/(\d+)\s*(ano|year|año|yr)/i)
-  const anos = matchAnos ? parseInt(matchAnos[1]) : (temCargo ? 2 : 0)
-  let score = anos === 0 ? 0 : anos < 1 ? 20 : anos < 2 ? 50 : anos < tempoMin ? 65 : anos < tempoMin + 2 ? 85 : 100
-  if (!temCargo && cfg.config.d3_penalizar) score = Math.round(score * 0.5)
-  return { score, detalhe: `~${anos} anos na função` }
+function calcD3(cfg: ConfigTriagem, d: DadosCandidato, cargo: GateCargo) {
+  const config = configSeguro(cfg); const tempoMinimo = Math.max(1, config.d3_tempo_min || 3)
+  const relevantes = (d.historico || []).filter(item => cargo.titulosAderentes.includes(String(item.cargo || '')))
+  const meses = relevantes.reduce((total, item) => total + (mesesDaExperiencia(item) || 0), 0)
+  if (!meses) return { score: cargo.atende ? 50 : (config.d3_penalizar ? 0 : 20), detalhe: cargo.atende ? 'Cargo aderente, mas sem datas suficientes para calcular o tempo' : 'Sem experiência relevante comprovável' }
+  const anos = Math.round((meses / 12) * 10) / 10
+  const score = anos >= tempoMinimo + 2 ? 100 : anos >= tempoMinimo ? 85 : anos >= tempoMinimo * 0.65 ? 65 : anos >= 1 ? 45 : 20
+  return { score, detalhe: `${anos.toLocaleString('pt-BR', { maximumFractionDigits: 1 })} ano(s) em cargo compatível` }
 }
-const LIDER_KW = ['gerente','gestor','manager','head','director','diretora','diretor','coordenador','supervisor','lider','leader','vice']
 function calcD4(cfg: ConfigTriagem, d: DadosCandidato) {
-  if (!cfg.config.d4_ativo) return { score: 100, detalhe: 'Não avaliado' }
-  const txt = norm([d.cargo_atual, d.experiencias].join(' '))
-  const temLider = LIDER_KW.some(k => txt.includes(k))
-  if (!temLider) return { score: 10, detalhe: 'Sem liderança identificada' }
-  const m = txt.match(/(\d+)\s*(ano|year|año)/i)
-  const anos = m ? parseInt(m[1]) : 2
-  const min = cfg.config.d4_tempo_min || 2
-  return { score: anos >= min ? 100 : Math.round((anos / min) * 80), detalhe: `Liderança ~${anos} anos` }
+  const config = configSeguro(cfg)
+  if (!config.d4_ativo) return { score: 100, detalhe: 'Liderança não avaliada — critério neutro' }
+  const texto = norm([d.cargo_atual, d.experiencias, ...(d.historico || []).map(item => item.cargo)].filter(Boolean).join(' '))
+  const temLideranca = LIDER_KW.some(termo => texto.includes(termo))
+  return temLideranca ? { score: 100, detalhe: 'Liderança identificada' } : { score: 0, detalhe: 'Sem liderança identificada' }
 }
-const NIVEL_ORDER = ['tecnico','medio','superior','pos','mba','especializacao','mestrado','doutorado','phd']
-const NIVEL_MAP: Record<string, number> = { qualquer: 0, tecnico: 1, medio: 1, superior: 2, pos: 3, mba: 3, especializacao: 3, mestrado: 4, doutorado: 5, phd: 5 }
 function calcD5(cfg: ConfigTriagem, d: DadosCandidato) {
-  const form = norm(d.formacao || '')
-  if (!form) return { score: 20, detalhe: 'Formação não informada' }
-  const formacoes = (cfg.config.d5_formacoes || []).map(norm)
-  const nivelMin = norm(cfg.config.d5_nivel_min || 'qualquer')
-  const matchArea = !formacoes.length || formacoes.some(f => form.includes(f))
-  const nivelCand = NIVEL_ORDER.find(n => form.includes(n)) || 'qualquer'
-  const atendeNivel = (NIVEL_MAP[nivelCand] || 0) >= (NIVEL_MAP[nivelMin] || 0)
-  if (!matchArea && !atendeNivel) return { score: 20, detalhe: 'Formação fora do perfil' }
-  if (!matchArea) return { score: 50, detalhe: 'Nível ok, área divergente' }
-  if (!atendeNivel) return { score: 50, detalhe: 'Área ok, nível abaixo do mínimo' }
-  return { score: 100, detalhe: `Formação aderente: ${nivelCand}` }
+  const config = configSeguro(cfg); const formacoes = (config.d5_formacoes || []).map(norm).filter(Boolean); const nivelMinimo = norm(config.d5_nivel_min || 'qualquer')
+  if (!formacoes.length && nivelMinimo === 'qualquer') return { score: 100, detalhe: 'Formação não configurada — critério neutro' }
+  const formacao = norm(d.formacao)
+  if (!formacao) return { score: 0, detalhe: 'Formação não informada' }
+  const areaAderente = !formacoes.length || formacoes.some(requisito => formacao.includes(requisito))
+  const nivelCandidato = NIVEL_ORDER.find(nivel => formacao.includes(nivel)) || 'qualquer'
+  const nivelAderente = (NIVEL_MAP[nivelCandidato] || 0) >= (NIVEL_MAP[nivelMinimo] || 0)
+  if (!areaAderente && !nivelAderente) return { score: 0, detalhe: 'Formação fora do perfil' }
+  if (!areaAderente || !nivelAderente) return { score: 45, detalhe: !areaAderente ? 'Área de formação divergente' : 'Nível abaixo do mínimo' }
+  return { score: 100, detalhe: `Formação aderente: ${nivelCandidato}` }
 }
-const CARNE_KW = ['frigorifico','bovino','suino','frango','carnes','jbs','marfrig','brf','minerva','meatpacking','beef','pork','poultry','abatedouro','carne']
-const ALIM_KW = ['alimentos','food','bebidas','laticinios','nestle','unilever','ambev','danone','fmcg','consumo']
 function calcD8(cfg: ConfigTriagem, d: DadosCandidato) {
-  const txt = norm([d.empresa_atual, d.experiencias].join(' '))
-  if (CARNE_KW.some(k => txt.includes(k))) return { score: 100, detalhe: 'Experiência em indústria de carne ✓' }
-  if (ALIM_KW.some(k => txt.includes(k))) return { score: 60, detalhe: 'Experiência em alimentos (não carne)' }
-  if (cfg.config.d8_eliminatorio) return { score: 0, detalhe: 'ELIMINADO: sem experiência em carne' }
-  return { score: 10, detalhe: 'Sem experiência na indústria' }
+  const config = configSeguro(cfg)
+  if (!config.d8_ativo && !config.d8_eliminatorio) return { score: 100, detalhe: 'Indústria não avaliada — critério neutro' }
+  const texto = norm([d.empresa_atual, d.experiencias].filter(Boolean).join(' '))
+  if (CARNE_KW.some(termo => texto.includes(termo))) return { score: 100, detalhe: 'Experiência em indústria de carne ✓' }
+  if (ALIM_KW.some(termo => texto.includes(termo))) return { score: 60, detalhe: 'Experiência em alimentos (não carne)' }
+  return { score: 0, detalhe: config.d8_eliminatorio ? 'Sem experiência em carne — eliminatório' : 'Sem experiência na indústria priorizada' }
 }
-const NIVEL_IDIOMA: Record<string, number> = { basico: 1, basic: 1, basica: 1, intermediario: 2, intermediate: 2, intermedio: 2, avancado: 3, advanced: 3, avanzado: 3, fluente: 4, fluent: 4, nativo: 4, native: 4 }
-function nivelIdioma(txt: string, idioma: string): number {
-  const t = norm(txt)
-  if (!t.includes(norm(idioma))) return 0
-  for (const [k, v] of Object.entries(NIVEL_IDIOMA)) { if (t.includes(k)) return v }
-  return 1
-}
-function idiomaNA(s?: string): boolean {
-  const n = norm(s || '')
-  return !n || n.includes('nao aplicavel') || n.includes('nao exigido')
-}
+function idiomaNA(idioma?: string): boolean { const texto = norm(idioma); return !texto || texto.includes('nao aplicavel') || texto.includes('nao exigido') }
+function nivelIdioma(texto: string, idioma: string): number { const fonte = norm(texto); if (!fonte.includes(norm(idioma))) return 0; for (const [nome, nivel] of Object.entries(NIVEL_IDIOMA)) if (fonte.includes(nome)) return nivel; return 1 }
 function calcD9(cfg: ConfigTriagem, d: DadosCandidato) {
-  if (idiomaNA(cfg.config.d9_idioma1) && idiomaNA(cfg.config.d9_idioma2)) {
-    return { score: 100, detalhe: 'Idiomas: Não Aplicável — dimensão neutra' }
-  }
-  const txt = d.idiomas || d.experiencias || ''
-  const i1 = cfg.config.d9_idioma1 || 'ingles'
-  const n1Min = NIVEL_IDIOMA[norm(cfg.config.d9_nivel1 || 'avancado')] || 3
-  const i2 = cfg.config.d9_idioma2 || ''
-  const n2Min = NIVEL_IDIOMA[norm(cfg.config.d9_nivel2 || 'intermediario')] || 2
-  const na1 = idiomaNA(i1); const na2 = idiomaNA(i2)
-  const nv1 = na1 ? 0 : nivelIdioma(txt, i1)
-  const nv2 = na2 ? 0 : (i2 ? nivelIdioma(txt, i2) : n2Min)
-  const s1 = na1 ? 100 : (nv1 >= n1Min ? 100 : Math.round((nv1 / n1Min) * 70))
-  const s2 = na2 ? 100 : (i2 ? (nv2 >= n2Min ? 100 : Math.round((nv2 / n2Min) * 70)) : 100)
-  return { score: Math.round(s1 * 0.6 + s2 * 0.4), detalhe: `${i1}: nível ${nv1}/4${i2 ? ` | ${i2}: nível ${nv2}/4` : ''}` }
+  const config = configSeguro(cfg)
+  if (idiomaNA(config.d9_idioma1) && idiomaNA(config.d9_idioma2)) return { score: 100, detalhe: 'Idiomas não avaliados — critério neutro' }
+  const idioma1 = config.d9_idioma1 || 'ingles'; const nivel1 = NIVEL_IDIOMA[norm(config.d9_nivel1 || 'avancado')] || 3
+  const idioma2 = config.d9_idioma2 || ''; const nivel2 = NIVEL_IDIOMA[norm(config.d9_nivel2 || 'intermediario')] || 2
+  const nota1 = idiomaNA(idioma1) ? 100 : Math.min(100, Math.round((nivelIdioma(d.idiomas || '', idioma1) / nivel1) * 100))
+  const nota2 = idiomaNA(idioma2) ? 100 : Math.min(100, Math.round((nivelIdioma(d.idiomas || '', idioma2) / nivel2) * 100))
+  return { score: Math.round(nota1 * 0.6 + nota2 * 0.4), detalhe: `${idioma1}: ${nota1}%${idioma2 ? ` · ${idioma2}: ${nota2}%` : ''}` }
 }
 function calcD10(cfg: ConfigTriagem, d: DadosCandidato) {
-  const cidade = norm(d.cidade || ''); const estado = norm(d.estado || '')
-  const cidades = (cfg.config.d10_cidades || []).map(norm)
-  if (!cidades.length) return { score: 80, detalhe: 'Sem restrição de localização' }
-  if (!cidade) return { score: 40, detalhe: 'Localização não informada' }
-  if (cidades.some(c => cidade.includes(c) || c.includes(cidade))) return { score: 100, detalhe: `Cidade: ${d.cidade} ✓` }
-  if (cfg.config.d10_tolerancia !== 'exato' && estado) {
-    const est = cidades.map(c => c.split(' ').pop() || '')
-    if (est.some(e => estado.includes(e))) return { score: 70, detalhe: `Mesmo estado: ${d.estado}` }
-  }
-  return { score: 20, detalhe: `Fora da região: ${d.cidade}` }
+  const cidades = (configSeguro(cfg).d10_cidades || []).map(norm).filter(Boolean)
+  if (!cidades.length) return { score: 100, detalhe: 'Localização não restringida — critério neutro' }
+  const cidade = norm(d.cidade)
+  if (!cidade) return { score: 35, detalhe: 'Localização não informada' }
+  return cidades.some(aceita => cidade.includes(aceita) || aceita.includes(cidade)) ? { score: 100, detalhe: `Cidade aderente: ${d.cidade}` } : { score: 0, detalhe: `Fora da região: ${d.cidade}` }
 }
+function parseSalario(valor?: string): number | null { if (!valor) return null; let numero = String(valor).replace(/[^0-9,.-]/g, ''); if (numero.includes(',') && numero.includes('.')) numero = numero.replace(/\./g, '').replace(',', '.'); else numero = numero.replace(',', '.'); const resultado = Number(numero); return Number.isFinite(resultado) && resultado > 0 ? resultado : null }
 
 export function calcularScore(cfg: ConfigTriagem, d: DadosCandidato): ResultadoScore {
-  const p = cfg.pesos
-  const tp = Object.values(p).reduce((s, v) => s + v, 0) || 100
-  const r1=calcD1(cfg,d), r2=calcD2(cfg,d), r3=calcD3(cfg,d), r4=calcD4(cfg,d)
-  const r5=calcD5(cfg,d), r8=calcD8(cfg,d), r9=calcD9(cfg,d), r10=calcD10(cfg,d)
-  if (r8.score === 0 && cfg.config.d8_eliminatorio) {
-    return { score_d1:r1.score, score_d2:r2.score, score_d3:r3.score, score_d4:r4.score, score_d5:r5.score, score_d8:0, score_d9:r9.score, score_d10:r10.score, score_total:0, classificacao:'reprovado', destaque:false, detalhes:{d1:r1.detalhe,d2:r2.detalhe,d3:r3.detalhe,d4:r4.detalhe,d5:r5.detalhe,d8:r8.detalhe,d9:r9.detalhe,d10:r10.detalhe,eliminado:'Critério eliminatório: Indústria de Carne'} }
-  }
-  let score_total = Math.round((r1.score*p.d1+r2.score*p.d2+r3.score*p.d3+r4.score*p.d4+r5.score*p.d5+r8.score*p.d8+r9.score*p.d9+r10.score*p.d10)/tp)
-
-  // Faixa salarial — parâmetro de aproximação (nunca penaliza quem não informou)
-  let salDetalhe = 'Pretensão não informada — sem impacto'
-  const sMin = cfg.config.salario_min; const sMax = cfg.config.salario_max
-  if ((sMin || sMax) && d.salario_pret) {
-    const sal = parseFloat(String(d.salario_pret).replace(/[^0-9.,]/g, '').replace(',', '.'))
-    if (!isNaN(sal) && sal > 0) {
-      const min = sMin || 0; const max = sMax || Infinity
-      if (sal >= min && sal <= max) { score_total = Math.min(100, score_total + 3); salDetalhe = `Dentro da faixa (R$ ${sal.toLocaleString('pt-BR')}) — bônus +3` }
-      else if (max !== Infinity && sal > max * 1.15) { score_total = Math.max(0, score_total - 3); salDetalhe = `Acima da faixa (R$ ${sal.toLocaleString('pt-BR')}) — ajuste -3` }
-      else if (sal < min) { score_total = Math.min(100, score_total + 1); salDetalhe = `Abaixo da faixa (R$ ${sal.toLocaleString('pt-BR')}) — bônus +1` }
-      else { salDetalhe = `Próximo da faixa (R$ ${sal.toLocaleString('pt-BR')}) — neutro` }
-    }
-  }
-
-  const classificacao = score_total >= cfg.limiar_aprovado ? 'aprovado' : score_total >= cfg.limiar_potencial ? 'potencial' : 'reprovado'
-  return { score_d1:r1.score, score_d2:r2.score, score_d3:r3.score, score_d4:r4.score, score_d5:r5.score, score_d8:r8.score, score_d9:r9.score, score_d10:r10.score, score_total, classificacao, destaque: classificacao==='aprovado' && score_total>=80, detalhes:{d1:r1.detalhe,d2:r2.detalhe,d3:r3.detalhe,d4:r4.detalhe,d5:r5.detalhe,d8:r8.detalhe,d9:r9.detalhe,d10:r10.detalhe,salario:salDetalhe} }
+  const config = configSeguro(cfg); const cargo = avaliarCargo(cfg, d); const conhecimentos = avaliarConhecimentos(cfg, d)
+  const r1 = calcD1(cfg, d); const r2 = calcD2(cfg, d); const r3 = calcD3(cfg, d, cargo); const r4 = calcD4(cfg, d); const r5 = calcD5(cfg, d); const r8 = calcD8(cfg, d); const r9 = calcD9(cfg, d); const r10 = calcD10(cfg, d)
+  const base = { score_d1:r1.score, score_d2:r2.score, score_d3:r3.score, score_d4:r4.score, score_d5:r5.score, score_d8:r8.score, score_d9:r9.score, score_d10:r10.score }
+  const detalhes = { d1:r1.detalhe, d2:r2.detalhe, d3:r3.detalhe, d4:r4.detalhe, d5:r5.detalhe, d8:r8.detalhe, d9:r9.detalhe, d10:r10.detalhe, gate_cargo:cargo.detalhes, gate_conhecimentos:conhecimentos.detalhes }
+  const semCriterio = !norm(cfg.cargo_buscado) && !norm(cfg.descritivo) && conhecimentos.total === 0
+  const motivo = semCriterio ? 'Triagem bloqueada: importe ou configure a vaga antes de avaliar candidatos.' : cargo.ativo && !cargo.atende ? `Cargo/família incompatível: ${cargo.detalhes}` : conhecimentos.total > 0 && !conhecimentos.atende ? `Requisitos essenciais não comprovados: ${conhecimentos.faltantes.join(', ')}` : config.d8_eliminatorio && r8.score === 0 ? 'Critério eliminatório: indústria de carne' : ''
+  if (motivo) return { ...base, score_total:0, classificacao:'reprovado', destaque:false, detalhes:{ ...detalhes, eliminado:motivo } }
+  const p = cfg.pesos; const totalPesos = Object.values(p).reduce((total, valor) => total + valor, 0) || 100
+  let scoreTotal = Math.round((r1.score*p.d1 + r2.score*p.d2 + r3.score*p.d3 + r4.score*p.d4 + r5.score*p.d5 + r8.score*p.d8 + r9.score*p.d9 + r10.score*p.d10) / totalPesos)
+  let salarioDetalhe = 'Pretensão não informada — sem impacto'; const salario = parseSalario(d.salario_pret)
+  if ((config.salario_min || config.salario_max) && salario) { const minimo = config.salario_min || 0; const maximo = config.salario_max || Infinity; if (salario >= minimo && salario <= maximo) { scoreTotal = Math.min(100, scoreTotal + 3); salarioDetalhe = 'Dentro da faixa — bônus +3' } else if (maximo !== Infinity && salario > maximo * 1.15) { scoreTotal = Math.max(0, scoreTotal - 3); salarioDetalhe = 'Acima da faixa — ajuste -3' } else if (salario < minimo) { scoreTotal = Math.min(100, scoreTotal + 1); salarioDetalhe = 'Abaixo da faixa — bônus +1' } }
+  const classificacao = scoreTotal >= cfg.limiar_aprovado ? 'aprovado' : scoreTotal >= cfg.limiar_potencial ? 'potencial' : 'reprovado'
+  return { ...base, score_total:scoreTotal, classificacao, destaque:classificacao === 'aprovado' && scoreTotal >= 80, detalhes:{ ...detalhes, salario:salarioDetalhe } }
 }
