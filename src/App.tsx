@@ -9,7 +9,9 @@ import { type Candidato } from './lib/supabase'
 
 type Nav = 'dashboard' | 'params' | 'triagem' | 'results' | 'whatsapp' | 'gupy' | 'config'
 type Classificacao = 'aprovado' | 'potencial' | 'reprovado' | 'pendente'
-const PESOS_PADRAO = { d1:20, d2:10, d3:15, d4:10, d5:10, d8:15, d9:10, d10:10 }
+// Critérios sem configuração ficam neutros. A decisão deve ser dominada por
+// aderência comprovada à função, experiência relevante e localização quando aplicável.
+const PESOS_PADRAO = { d1:55, d2:0, d3:25, d4:0, d5:0, d8:0, d9:0, d10:20 }
 const BADGE_COLORS: Record<string, string> = { aprovado:'46,204,113', potencial:'201,168,76', reprovado:'231,76,60', pendente:'136,135,128' }
 
 function Badge({ children, color }: { children: React.ReactNode; color: string }) {
@@ -21,6 +23,37 @@ function ScoreBar({ value, color }: { value: number; color: string }) {
 function Alerta({ msg, tipo }: { msg: string; tipo: 'success'|'warn'|'info' }) {
   const c = tipo==='success'?'46,204,113':tipo==='warn'?'230,126,34':'52,152,219'
   return <div style={{ padding:'10px 14px', borderRadius:10, fontSize:13, display:'flex', gap:8, background:`rgba(${c},0.1)`, border:`0.5px solid rgba(${c},0.25)`, color:`rgb(${c})`, marginBottom:'1rem' }}>{msg}</div>
+}
+
+type DadosVagaImportada = { nome: string; cargo: string; descritivo: string; obrigatorios: string[] }
+
+function limparCargoGupy(valor: unknown): string {
+  return String(valor || '')
+    .replace(/^\s*\d+\s*[-–:]\s*/, '')
+    .replace(/\(?\s*banco\s+de\s+talentos\s*\)?/gi, '')
+    .replace(/\bcontrata[çc][ãa]o\s*:\s*(pj|clt)\s*[|:-]?/gi, '')
+    .replace(/\s+/g, ' ').replace(/^[-–|:\s]+|[-–|:\s]+$/g, '').trim()
+}
+
+function termosObrigatoriosDaVaga(vaga: any): string[] {
+  // Só sugerimos termos técnicos inequívocos encontrados nos pré-requisitos da vaga.
+  // O recrutador pode ajustar antes da triagem; isso evita transformar texto genérico em bloqueio.
+  const fonte = String([vaga?.prerequisites, vaga?.relevantExperiences].filter(Boolean).join(' ')).toLowerCase()
+  if (!fonte) return []
+  const catalogo: [RegExp, string][] = [
+    [/s\s*\/?\s*4\s*hana|s4hana/i, 'SAP S/4HANA'], [/\bsap\b/i, 'SAP'], [/\babap\b/i, 'ABAP'],
+    [/\bapi(?:s)?\b/i, 'API'], [/\brest\b/i, 'REST'], [/\bsoap\b/i, 'SOAP'], [/\bjson\b/i, 'JSON'], [/\bxml\b/i, 'XML'],
+    [/\bsql\b/i, 'SQL'], [/power\s*bi/i, 'Power BI'], [/\bprotheus\b/i, 'Protheus'], [/\btotvs\b/i, 'TOTVS'],
+    [/salesforce/i, 'Salesforce'], [/\bpython\b/i, 'Python'], [/\bjava\b/i, 'Java'], [/\.net|dotnet/i, '.NET'],
+  ]
+  return [...new Set(catalogo.filter(([padrao]) => padrao.test(fonte)).map(([, termo]) => termo))].slice(0, 6)
+}
+
+function dadosDaVaga(job: any): DadosVagaImportada {
+  const cargo = limparCargoGupy(job?.roleName || job?.role?.name || job?.name)
+  const descritivo = [job?.description, job?.responsibilities, job?.prerequisites, job?.relevantExperiences]
+    .filter(Boolean).join('\n\n').replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim()
+  return { nome: limparCargoGupy(job?.name), cargo, descritivo, obrigatorios: termosObrigatoriosDaVaga(job) }
 }
 
 export default function App() {
@@ -36,12 +69,15 @@ export default function App() {
   const [limAp, setLimAp] = useState(70)
   const [limPot, setLimPot] = useState(40)
   const [d8elim, setD8elim] = useState(false)
-  const [d4ativo, setD4ativo] = useState(true)
-  const [d9i1, setD9i1] = useState('Inglês'); const [d9n1, setD9n1] = useState('avancado')
-  const [d9i2, setD9i2] = useState('Espanhol'); const [d9n2, setD9n2] = useState('intermediario')
+  const [d4ativo, setD4ativo] = useState(false)
+  const [d9i1, setD9i1] = useState('Não Aplicável'); const [d9n1, setD9n1] = useState('avancado')
+  const [d9i2, setD9i2] = useState('Não Aplicável'); const [d9n2, setD9n2] = useState('intermediario')
   const [d10cidades, setD10cidades] = useState('')
   const [salMin, setSalMin] = useState('')
   const [conhec, setConhec] = useState<string[]>(['','','','','',''])
+  const [conhecObrig, setConhecObrig] = useState<string[]>(['','','','','',''])
+  const [cargosCompativeis, setCargosCompativeis] = useState('')
+  const [termosExcluidos, setTermosExcluidos] = useState('')
   const [salMax, setSalMax] = useState('')
   const [alert, setAlert] = useState<{msg:string;tipo:'success'|'warn'|'info'}|null>(null)
   const [processoId, setProcessoId] = useState<string|null>(null)
@@ -68,6 +104,7 @@ export default function App() {
   const [gMoveLog, setGMoveLog] = useState<string[]>([])
   const [gBuscaId, setGBuscaId] = useState('')
   const [gVagaInfo, setGVagaInfo] = useState<any>(null)
+  const [criteriosVagaId, setCriteriosVagaId] = useState('')
 
   const mudarIdioma = (l: string) => { setLang(l); localStorage.setItem('robinho_lang', l); i18n.changeLanguage(l) }
   const mostrarAlerta = (msg: string, tipo: 'success'|'warn'|'info' = 'success') => { setAlert({ msg, tipo }); setTimeout(() => setAlert(null), 3500) }
@@ -81,13 +118,49 @@ export default function App() {
     setKeywords(Object.entries(freq).sort((a,b)=>b[1]-a[1]).slice(0,18).map(([w])=>w))
   }, [pDesc])
 
+  const construirConfig = (vagaImportada?: DadosVagaImportada): ConfigTriagem => {
+    const obrigatoriosManuais = conhecObrig.map(item => item.trim()).filter(Boolean)
+    const obrigatorios = obrigatoriosManuais.length ? obrigatoriosManuais : (vagaImportada?.obrigatorios || [])
+    return {
+      descritivo: vagaImportada?.descritivo || pDesc,
+      cargo_buscado: vagaImportada?.cargo || pCargo,
+      sensibilidade: pSens,
+      limiar_aprovado: limAp,
+      limiar_potencial: limPot,
+      pesos,
+      config: {
+        d8_ativo:d8elim, d8_eliminatorio:d8elim, d4_ativo:d4ativo,
+        d9_idioma1:d9i1, d9_nivel1:d9n1, d9_idioma2:d9i2, d9_nivel2:d9n2,
+        d10_cidades:d10cidades.split(',').map(s=>s.trim()).filter(Boolean),
+        salario_min:salMin?parseFloat(salMin):undefined, salario_max:salMax?parseFloat(salMax):undefined,
+        conhecimentos:conhec.map(s=>s.trim()).filter(Boolean),
+        conhecimentos_obrigatorios:obrigatorios,
+        cargos_compativeis:cargosCompativeis.split(',').map(s=>s.trim()).filter(Boolean),
+        termos_excluidos:termosExcluidos.split(',').map(s=>s.trim()).filter(Boolean),
+        cargo_obrigatorio:true,
+      },
+    }
+  }
+
+  const aplicarDadosDaVaga = (job: any): DadosVagaImportada => {
+    const vaga = dadosDaVaga(job)
+    setPNome(vaga.nome || '')
+    setPCargo(vaga.cargo || '')
+    if (vaga.descritivo) setPDesc(vaga.descritivo)
+    setCriteriosVagaId(String(job?.id || ''))
+    // Nunca sobrescrever uma revisão manual de requisitos já feita pelo recrutador.
+    setConhecObrig(atual => atual.some(item => item.trim()) ? atual : [...vaga.obrigatorios, ...Array(Math.max(0, 6 - vaga.obrigatorios.length)).fill('')])
+    return vaga
+  }
+
   const salvarConfig = async () => {
     // Os valores da tela já são os parâmetros usados pela triagem nesta sessão.
     // A persistência em nuvem é complementar e não deve impedir a ativação visual.
     setConfigAtiva(true)
     mostrarAlerta('✅ Configuração ativada com sucesso!')
     try {
-      const p = await salvarProcesso({ id: processoId||undefined, nome: pNome||'Processo sem nome', responsavel: pResp, cargo_buscado: pCargo, descritivo: pDesc, sensibilidade: pSens, limiar_aprovado: limAp, limiar_potencial: limPot, pesos, config:{ d8_eliminatorio:d8elim, d4_ativo:d4ativo, d9_idioma1:d9i1, d9_nivel1:d9n1, d9_idioma2:d9i2, d9_nivel2:d9n2, d10_cidades:d10cidades.split(',').map(s=>s.trim()).filter(Boolean), salario_min:salMin?parseFloat(salMin):undefined, salario_max:salMax?parseFloat(salMax):undefined, conhecimentos:conhec.map(s=>s.trim()).filter(Boolean) }, idioma: lang as 'pt'|'en'|'es' })
+      const cfg = construirConfig()
+      const p = await salvarProcesso({ id: processoId||undefined, nome: pNome||'Processo sem nome', responsavel: pResp, cargo_buscado: cfg.cargo_buscado, descritivo: cfg.descritivo, sensibilidade: pSens, limiar_aprovado: limAp, limiar_potencial: limPot, pesos, config:cfg.config, idioma: lang as 'pt'|'en'|'es' })
       if (p) setProcessoId(p.id)
     } catch (e) {
       console.warn('[Robinho] Configuração ativa na sessão; nuvem indisponível.', e)
@@ -103,11 +176,11 @@ export default function App() {
   const iniciarTriagem = async () => {
     if (!csvRows.length) return
     setProcessando(true); setProgresso(0)
-    const cfg: ConfigTriagem = { descritivo:pDesc, cargo_buscado:pCargo, sensibilidade:pSens, limiar_aprovado:limAp, limiar_potencial:limPot, pesos, config:{ d8_eliminatorio:d8elim, d4_ativo:d4ativo, d9_idioma1:d9i1, d9_nivel1:d9n1, d9_idioma2:d9i2, d9_nivel2:d9n2, d10_cidades:d10cidades.split(',').map(s=>s.trim()).filter(Boolean), salario_min:salMin?parseFloat(salMin):undefined, salario_max:salMax?parseFloat(salMax):undefined, conhecimentos:conhec.map(s=>s.trim()).filter(Boolean) } }
+    const cfg = construirConfig()
     const dadosMap: DadosCandidato[] = csvRows.map(r => mapearCandidato(r, mapeamento))
     const resultados = dadosMap.map((d, i) => { const r = calcularScore(cfg, d); setProgresso(Math.round((i+1)/dadosMap.length*100)); return { ...r, score_custom:{}, ...d, id:String(i), triagem_id:'local', processo_id:'local', wpp_enviado:false, wpp_enviado_at:null, salario_pret:null, dados_brutos:d.dados_brutos, created_at:new Date().toISOString(), rank:i+1 } as unknown as Candidato & {rank:number} })
     try {
-      const pid = processoId || (await salvarProcesso({ nome:pNome||'Processo', responsavel:pResp, cargo_buscado:pCargo, descritivo:pDesc, sensibilidade:pSens, limiar_aprovado:limAp, limiar_potencial:limPot, pesos, config:{}, idioma:lang as 'pt'|'en'|'es' }))?.id
+      const pid = processoId || (await salvarProcesso({ nome:pNome||'Processo', responsavel:pResp, cargo_buscado:cfg.cargo_buscado, descritivo:cfg.descritivo, sensibilidade:pSens, limiar_aprovado:limAp, limiar_potencial:limPot, pesos, config:cfg.config, idioma:lang as 'pt'|'en'|'es' }))?.id
       if (pid) {
         const tr = await criarTriagem(pid, `Triagem ${new Date().toLocaleDateString('pt-BR')}`, mapeamento)
         if (tr) {
@@ -143,6 +216,17 @@ export default function App() {
     if (!gJobId) return
     setGLoading(true); setGStatus('Buscando candidatos e etapas...')
     try {
+      // A vaga selecionada sempre alimenta os critérios desta execução. Isso evita
+      // pontuar candidatos de uma vaga nova com parâmetros da vaga anterior.
+      let vagaImportada: DadosVagaImportada | undefined
+      if (criteriosVagaId !== String(gJobId)) {
+        setGStatus('Importando critérios da vaga antes da triagem...')
+        const rJob = await fetch(`/api/gupy?action=jobinfo&jobId=${gJobId}`)
+        const jobData = await rJob.json()
+        if (!rJob.ok) { setGStatus('❌ ' + (jobData.error || 'Não foi possível importar os critérios da vaga')); return }
+        setGVagaInfo(jobData.job)
+        vagaImportada = aplicarDadosDaVaga(jobData.job)
+      }
       const [rApps, rSteps] = await Promise.all([
         fetch(`/api/gupy?action=applications&jobId=${gJobId}`),
         fetch(`/api/gupy?action=steps&jobId=${gJobId}`),
@@ -150,11 +234,15 @@ export default function App() {
       const apps = await rApps.json(); const steps = await rSteps.json()
       if (!rApps.ok) { setGStatus('❌ ' + (apps.error || 'Erro')); setGLoading(false); return }
       const normalizarEtapa = (valor: unknown) => String(valor || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase()
-      // Proteção adicional no navegador: mesmo que a API externa mude o formato,
-      // nunca enviar para a triagem alguém fora da etapa Cadastro.
-      const appsCadastro = (apps.results || apps.data || []).filter((a: any) =>
-        normalizarEtapa(a.currentStep?.name || a.currentStepName) === 'cadastro'
-      )
+      const appsRecebidos = apps.results || apps.data || []
+      const cadastroId = String(apps.filteredByStep?.id || '')
+      // O backend já filtra Cadastro por ID. Repetimos a proteção no navegador
+      // aceitando ID ou nome, porque em algumas respostas a Gupy não manda o nome.
+      const filtrados = appsRecebidos.filter((a: any) => {
+        const stepId = a.currentStepId ?? a.stepId ?? a.currentStep?.id
+        return cadastroId ? String(stepId || '') === cadastroId || normalizarEtapa(a.currentStep?.name || a.currentStepName) === 'cadastro' : normalizarEtapa(a.currentStep?.name || a.currentStepName) === 'cadastro'
+      })
+      const appsCadastro = filtrados.length || !cadastroId ? filtrados : appsRecebidos
       const etapasProcesso = (steps.results || steps.data || []).filter((s: any) => {
         const t = String(s.type || '').toLowerCase()
         const n = String(s.name || '').toLowerCase()
@@ -163,7 +251,8 @@ export default function App() {
                !n.includes('reprov') && !n.includes('desist') && !t.includes('hired') && !t.includes('final')
       })
       setGSteps(etapasProcesso.map((s: any) => ({ id: s.id, name: s.name + (s.type ? ` (${s.type})` : '') })))
-      const cfg: ConfigTriagem = { descritivo:pDesc, cargo_buscado:pCargo, sensibilidade:pSens, limiar_aprovado:limAp, limiar_potencial:limPot, pesos, config:{ d8_eliminatorio:d8elim, d4_ativo:d4ativo, d9_idioma1:d9i1, d9_nivel1:d9n1, d9_idioma2:d9i2, d9_nivel2:d9n2, d10_cidades:d10cidades.split(',').map(s=>s.trim()).filter(Boolean), salario_min:salMin?parseFloat(salMin):undefined, salario_max:salMax?parseFloat(salMax):undefined, conhecimentos:conhec.map(s=>s.trim()).filter(Boolean) } }
+      const cfg = construirConfig(vagaImportada)
+      if (!cfg.cargo_buscado.trim() && !cfg.descritivo.trim()) { setGStatus('❌ Não foi possível identificar os critérios da vaga. Revise a importação antes de triar.'); return }
       const lista = appsCadastro.map((a: any) => {
         const d: DadosCandidato = mapearPerfilGupy(a)
         const r = calcularScore(cfg, d)
@@ -178,8 +267,8 @@ export default function App() {
       lista.forEach((c: any) => { if (c.classificacao === 'aprovado') sel[c.applicationId] = true })
       setGSel(sel)
       setGStatus(`✅ ${lista.length} candidatos da etapa Cadastro triados · ${Object.keys(sel).length} aprovados pré-selecionados · 📊 Ranking disponível no Dashboard e em Resultados`)
-    } catch { setGStatus('❌ Falha ao buscar candidatos') }
-    setGLoading(false)
+    } catch (e) { console.warn('[Robinho] Falha na triagem Gupy', e); setGStatus('❌ Falha ao buscar candidatos') }
+    finally { setGLoading(false) }
   }
 
   const gupyBuscarVagaPorId = async () => {
@@ -198,13 +287,9 @@ export default function App() {
 
   const gupyAplicarVagaAosParametros = () => {
     if (!gVagaInfo) return
-    setPNome(gVagaInfo.name || '')
-    setPCargo(gVagaInfo.roleName || gVagaInfo.role?.name || gVagaInfo.name || '')
-    const desc = [gVagaInfo.description, gVagaInfo.responsibilities, gVagaInfo.prerequisites, gVagaInfo.relevantExperiences]
-      .filter(Boolean).join('\n\n').replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').trim()
-    if (desc) setPDesc(desc)
+    const vaga = aplicarDadosDaVaga(gVagaInfo)
     setNav('params')
-    mostrarAlerta('✅ Dados da vaga aplicados aos Parâmetros!')
+    mostrarAlerta(vaga.obrigatorios.length ? `✅ Dados da vaga aplicados. ${vaga.obrigatorios.length} requisito(s) técnico(s) sugerido(s) para revisão.` : '✅ Dados da vaga aplicados aos Parâmetros!')
   }
 
   const gupyPuxarParaParametros = async () => {
@@ -218,11 +303,7 @@ export default function App() {
       const job = data.job
       setGVagaInfo(job)
       setGJobId(String(job.id))
-      setPNome(job.name || '')
-      setPCargo(job.roleName || job.role?.name || job.name || '')
-      const desc = [job.description, job.responsibilities, job.prerequisites, job.relevantExperiences]
-        .filter(Boolean).join('\n\n').replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').trim()
-      if (desc) setPDesc(desc)
+      aplicarDadosDaVaga(job)
       mostrarAlerta(`✅ Vaga "${job.name}" importada da Gupy!`)
     } catch { mostrarAlerta('❌ Falha na conexão com a Gupy', 'warn') }
     setGLoading(false)
@@ -488,7 +569,21 @@ export default function App() {
                   <input type="number" value={salMax} onChange={e=>setSalMax(e.target.value)} placeholder="Máximo — ex: 15000" />
                 </div>
                 <p style={{ fontSize:10, color:'var(--text-dim)', marginBottom:8 }}>Parâmetro de aproximação: candidatos dentro da faixa ganham bônus. Quem não informou pretensão NÃO é penalizado.</p>
-                <label style={labelStyle}>Conhecimentos Específicos — até 6</label>
+                <label style={labelStyle}>Requisitos Essenciais — bloqueiam aprovação</label>
+                <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8, marginBottom:4 }}>
+                  {conhecObrig.map((v, i) => (
+                    <input key={i} value={v}
+                      onChange={e => setConhecObrig(arr => arr.map((x, j) => j === i ? e.target.value : x))}
+                      placeholder={['Ex: SAP S/4HANA', 'Ex: API | IDoc | CPI', 'Ex: Inglês avançado', 'Ex: Excel avançado', 'Ex: NR-10', 'Ex: CNH B'][i]} />
+                  ))}
+                </div>
+                <p style={{ fontSize:10, color:'var(--text-dim)', marginBottom:8 }}>O candidato precisa comprovar todos os itens preenchidos na experiência. Use <b>|</b> para alternativas equivalentes (ex.: API | IDoc | CPI).</p>
+                <label style={labelStyle}>Cargos compatíveis / sinônimos</label>
+                <input value={cargosCompativeis} onChange={e=>setCargosCompativeis(e.target.value)} placeholder="Ex.: Analista SAP, Consultor SAP, Desenvolvedor ABAP" style={{ marginBottom:4 }} />
+                <p style={{ fontSize:10, color:'var(--text-dim)', marginBottom:8 }}>O cargo importado é obrigatório. Cadastre aqui apenas títulos que você aceita como equivalentes.</p>
+                <label style={labelStyle}>Termos de exclusão (opcional)</label>
+                <input value={termosExcluidos} onChange={e=>setTermosExcluidos(e.target.value)} placeholder="Ex.: consultoria terceirizada, disponibilidade apenas presencial" style={{ marginBottom:8 }} />
+                <label style={labelStyle}>Conhecimentos Preferenciais — até 6</label>
                 <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8, marginBottom:4 }}>
                   {conhec.map((v, i) => (
                     <input key={i} value={v}
@@ -496,7 +591,7 @@ export default function App() {
                       placeholder={['Ex: Relatório GRI', 'Ex: Pegada de Carbono', 'Ex: Excel Avançado', 'Ex: SAP', 'Ex: Auditoria Ambiental', 'Ex: Power BI'][i]} />
                   ))}
                 </div>
-                <p style={{ fontSize:10, color:'var(--text-dim)', marginBottom:8 }}>Termos buscados no perfil de cada candidato. Cada correspondência aumenta a Aderência (D1) e fica registrada no detalhe do candidato.</p>
+                <p style={{ fontSize:10, color:'var(--text-dim)', marginBottom:8 }}>Estes itens ajudam a ordenar os candidatos elegíveis, mas não aprovam ninguém sozinho.</p>
                 <div style={{ display:'flex', gap:10, marginTop:8 }}>
                   <input type="checkbox" checked={d8elim} onChange={e=>setD8elim(e.target.checked)} id="d8e" style={{ width:'auto' }} />
                   <label htmlFor="d8e" style={{ fontSize:12, cursor:'pointer' }}>D8 — Indústria de carne como critério eliminatório</label>
@@ -588,6 +683,7 @@ export default function App() {
                         const lbl = t(`results.classificacao.${c.classificacao}`)||c.classificacao
                         const wppNum = (c.telefone||'').replace(/\D/g,'')
                         const wppMsg = encodeURIComponent(`Olá, ${(c.nome||'').split(',')[0]}! Minerva Foods — ${pNome}`)
+                        const motivoEliminacao = String((c.detalhes as any)?.eliminado || '')
                         return (
                           <tr key={c.id} style={{ borderBottom:'0.5px solid rgba(255,255,255,0.05)' }}>
                             <td style={{ padding:'10px 12px', color:'var(--text-muted)' }}>{c.rank??i+1}</td>
@@ -595,7 +691,10 @@ export default function App() {
                             <td style={{ padding:'10px 12px' }}><ScoreBar value={c.score_total} color={color} /></td>
                             <td style={{ padding:'10px 12px' }}><Badge color={color}>{lbl}</Badge></td>
                             <td style={{ padding:'10px 12px' }}>{c.destaque?'⭐':''}</td>
-                            <td style={{ padding:'10px 12px', color:'var(--text-muted)' }}>{c.cargo_atual}</td>
+                            <td style={{ padding:'10px 12px', color:'var(--text-muted)' }}>
+                              <div>{c.cargo_atual}</div>
+                              {motivoEliminacao && <div title={motivoEliminacao} style={{ marginTop:3, maxWidth:220, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', fontSize:10, color:'var(--red-light)' }}>⛔ {motivoEliminacao}</div>}
+                            </td>
                             <td style={{ padding:'10px 12px', color:'var(--text-muted)' }}>{c.cidade}{c.estado?`, ${c.estado}`:''}</td>
                             <td style={{ padding:'10px 12px' }}>{c.telefone}</td>
                             <td style={{ padding:'10px 12px' }}>{c.linkedin_url&&c.linkedin_url!=='—'?<a href={`https://${c.linkedin_url}`} target="_blank" rel="noreferrer" style={{ color:'var(--blue)', fontSize:11 }}>Ver →</a>:<span style={{ color:'var(--text-dim)' }}>—</span>}</td>
