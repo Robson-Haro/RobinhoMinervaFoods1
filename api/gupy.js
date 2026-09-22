@@ -81,23 +81,28 @@ export default async function handler(req, res) {
     return job
   }
 
-  // Diagnóstico: confirma se a variável chegou ao servidor (sem revelar o valor)
+  // Não expor metadados do token em endpoint público. A integração é validada
+  // pelas próprias operações de leitura de vagas e candidaturas.
   if (action === 'status') {
-    return res.status(200).json({
-      tokenConfigurado: true,
-      tamanhoToken: token.length,
-      inicioToken: token.slice(0, 4) + '...',
-      ambiente: process.env.VERCEL_ENV || 'desconhecido',
-      mensagem: '✅ Variável GUPY_API_TOKEN chegou ao servidor com sucesso'
-    })
+    return res.status(404).json({ error: 'Ação indisponível' })
   }
 
   try {
     // Listar vagas
     if (action === 'jobs') {
-      const r = await fetch(`${base}/jobs?perPage=100&status=published`, { headers })
-      const data = await r.json()
-      return res.status(r.status).json(data)
+      const vagas = []
+      let total = 0
+      const maxPages = 12
+      for (let page = 1; page <= maxPages; page++) {
+        const r = await fetch(`${base}/jobs?perPage=100&page=${page}&status=published`, { headers })
+        const data = await r.json()
+        if (!r.ok) return res.status(r.status).json(data)
+        const itens = data.results || data.data || (Array.isArray(data) ? data : [])
+        vagas.push(...itens)
+        total = data.totalCount || data.total || data.pagination?.total || data.pagination?.totalCount || total
+        if (itens.length < 100 || (total && vagas.length >= total)) break
+      }
+      return res.status(200).json({ results: vagas, totalCount: total || vagas.length, truncated: total > vagas.length })
     }
 
     // RASTREADOR: diagnóstico completo da busca de descrição
