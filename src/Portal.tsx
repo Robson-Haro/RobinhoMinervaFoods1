@@ -57,6 +57,38 @@ const systems: SystemCard[] = [
 
 export default function Portal() {
   const [enteredRobinho, setEnteredRobinho] = useState(false)
+  const [autorizado, setAutorizado] = useState(() => sessionStorage.getItem('robinho_acesso') === 'liberado')
+  const [senha, setSenha] = useState('')
+  const [erroSenha, setErroSenha] = useState('')
+
+  const validarAcesso = (e: React.FormEvent) => {
+    e.preventDefault()
+    if (senha === 'proibido') {
+      sessionStorage.setItem('robinho_acesso', 'liberado')
+      setAutorizado(true)
+      setErroSenha('')
+      return
+    }
+    setErroSenha('Senha inválida. Tente novamente.')
+  }
+
+  if (!autorizado) {
+    return (
+      <main className="talent-portal" style={{ display:'grid', placeItems:'center', minHeight:'100vh', padding:24 }}>
+        <div className="portal-orb orb-red" /><div className="portal-orb orb-blue" /><div className="portal-orb orb-beige" />
+        <form onSubmit={validarAcesso} className="glass-metal" style={{ position:'relative', zIndex:2, width:'min(100%, 430px)', padding:'34px', borderRadius:18 }}>
+          <img src="https://cronograma-de-vagas.vercel.app/minerva-logo.svg" alt="Minerva Foods" style={{ width:78, marginBottom:26 }} />
+          <span className="portal-kicker">ACESSO RESTRITO</span>
+          <h1 style={{ margin:'8px 0 10px', fontSize:30, letterSpacing:'-1.4px' }}>Ecossistema de<br /><strong>Talent Acquisition</strong></h1>
+          <p style={{ margin:'0 0 22px', maxWidth:330 }}>Digite a senha para acessar os sistemas de gestão de talentos.</p>
+          <label htmlFor="senha-acesso" style={{ display:'block', marginBottom:8, color:'#d7bd67', fontWeight:700, fontSize:11, letterSpacing:1, textTransform:'uppercase' }}>Senha de acesso</label>
+          <input id="senha-acesso" autoFocus type="password" value={senha} onChange={e => { setSenha(e.target.value); setErroSenha('') }} placeholder="Digite sua senha" style={{ width:'100%', boxSizing:'border-box', borderRadius:10, padding:'13px 14px', background:'rgba(6,14,26,.7)', border:'1px solid rgba(203,222,239,.26)', color:'#fff', fontSize:15 }} />
+          {erroSenha && <p role="alert" style={{ color:'#ff9ca9', fontSize:12, margin:'10px 0 0' }}>{erroSenha}</p>}
+          <button type="submit" style={{ width:'100%', marginTop:18, border:0, borderRadius:10, padding:'13px 16px', background:'linear-gradient(135deg,#bd4053,#7f2433)', color:'#fff', fontWeight:800, cursor:'pointer' }}>Entrar no ecossistema →</button>
+        </form>
+      </main>
+    )
+  }
 
   if (enteredRobinho) {
     return (
