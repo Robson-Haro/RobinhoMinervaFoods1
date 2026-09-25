@@ -59,6 +59,9 @@ function dadosDaVaga(job: any): DadosVagaImportada {
 export default function App() {
   const { t } = useTranslation()
   const [nav, setNav] = useState<Nav>('dashboard')
+  const [autorizado, setAutorizado] = useState(() => sessionStorage.getItem('robinho_acesso') === 'liberado')
+  const [senhaAcesso, setSenhaAcesso] = useState('')
+  const [erroSenha, setErroSenha] = useState('')
   const [lang, setLang] = useState(localStorage.getItem('robinho_lang') || 'pt')
   const [pesos, setPesos] = useState(PESOS_PADRAO)
   const [pNome, setPNome] = useState('')
@@ -339,6 +342,33 @@ export default function App() {
 
   const labelStyle: React.CSSProperties = { fontSize:11, fontWeight:600, color:'var(--gold)', letterSpacing:.8, textTransform:'uppercase', display:'block', marginBottom:6 }
   const secTitle = (txt: string) => <p style={{ fontSize:12, fontWeight:600, color:'var(--gold)', letterSpacing:.8, textTransform:'uppercase', marginBottom:'1rem' }}>{txt}</p>
+
+  const validarAcesso = (e: React.FormEvent) => {
+    e.preventDefault()
+    if (senhaAcesso === 'proibido') {
+      sessionStorage.setItem('robinho_acesso', 'liberado')
+      setAutorizado(true)
+      setErroSenha('')
+      return
+    }
+    setErroSenha('Senha inválida. Tente novamente.')
+  }
+
+  if (!autorizado) {
+    return (
+      <div style={{ minHeight:'100vh', display:'grid', placeItems:'center', padding:24, background:'radial-gradient(circle at top, #2a1017 0%, #0a0a0f 52%, #050507 100%)' }}>
+        <form onSubmit={validarAcesso} style={{ width:'min(100%, 420px)', padding:'2.25rem', borderRadius:18, background:'rgba(20,20,28,0.86)', border:'1px solid rgba(201,168,76,0.35)', boxShadow:'0 18px 60px rgba(0,0,0,0.48)', backdropFilter:'blur(18px)' }}>
+          <div style={{ width:52, height:52, borderRadius:14, display:'grid', placeItems:'center', marginBottom:18, background:'linear-gradient(135deg,#C41E3A,#8B1325)', color:'#fff', fontSize:24, fontWeight:800 }}>R</div>
+          <h1 style={{ margin:0, color:'#fff', fontSize:24 }}>Acesso restrito</h1>
+          <p style={{ margin:'8px 0 22px', color:'var(--text-muted)', fontSize:13, lineHeight:1.5 }}>Ecossistema de Talent Acquisition Estratégico · Minerva Foods</p>
+          <label style={{ ...labelStyle, marginBottom:8 }}>Senha de acesso</label>
+          <input autoFocus type="password" value={senhaAcesso} onChange={e => { setSenhaAcesso(e.target.value); setErroSenha('') }} placeholder="Digite a senha" style={{ width:'100%', boxSizing:'border-box', padding:'12px 14px', borderRadius:9, border:'1px solid rgba(255,255,255,0.18)', background:'rgba(255,255,255,0.07)', color:'#fff', fontSize:15, outline:'none' }} />
+          {erroSenha && <p role="alert" style={{ margin:'10px 0 0', color:'#ff8c96', fontSize:12 }}>{erroSenha}</p>}
+          <button type="submit" style={{ width:'100%', marginTop:18, padding:'12px 16px', borderRadius:9, border:'none', cursor:'pointer', fontWeight:700, fontSize:14, color:'#fff', background:'linear-gradient(135deg,#C41E3A,#8B1325)', boxShadow:'0 6px 18px rgba(196,30,58,0.28)' }}>Entrar no sistema</button>
+        </form>
+      </div>
+    )
+  }
 
   return (
     <div style={{ minHeight:'100vh' }}>
